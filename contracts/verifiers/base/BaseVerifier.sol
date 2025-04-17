@@ -8,8 +8,8 @@ abstract contract BaseVerifier is IERC7857DataVerifier {
     mapping(bytes32 => bool) internal usedProofs;
 
     // check and mark proof used
-    function _checkAndMarkProof(bytes32 proofHash) internal {
-        require(!usedProofs[proofHash], "Proof already used");
-        usedProofs[proofHash] = true;
+    function _checkAndMarkProof(bytes32 proofNonce) internal {
+        require(!usedProofs[proofNonce], "Proof already used");
+        usedProofs[proofNonce] = true;
     }
 }

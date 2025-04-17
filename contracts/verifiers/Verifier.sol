@@ -17,8 +17,8 @@ contract Verifier is BaseVerifier {
         verifierType = _verifierType;
     }
 
-    function hashProof(bytes calldata proof) private pure returns (bytes32) {
-        return keccak256(proof);
+    function hashNonce(bytes memory nonce) private pure returns (bytes32) {
+        return keccak256(nonce);
     }
 
     /// @notice Verify preimage of data, the _proof prove:
@@ -52,6 +52,7 @@ contract Verifier is BaseVerifier {
     function verifyAccessibility(
         bytes memory accessibilityProof,
         bool isPrivate,
+        bytes memory nonce,
         bytes32 newDataHash,
         bytes32 oldDataHash
     ) private pure returns (address) {
@@ -69,7 +70,7 @@ contract Verifier is BaseVerifier {
             v := byte(0, mload(add(accessibilityProof, 96)))
         }
 
-        bytes32 messageHash = createMessageHash(isPrivate, newDataHash, oldDataHash);
+        bytes32 messageHash = createMessageHash(isPrivate, newDataHash, oldDataHash, nonce);
 
         return ecrecover(messageHash, v, r, s);
     }
@@ -82,23 +83,26 @@ contract Verifier is BaseVerifier {
     function createMessageHash(
         bool isPrivate,
         bytes32 newDataHash,
-        bytes32 oldDataHash
+        bytes32 oldDataHash,
+        bytes memory nonce
     ) private pure returns (bytes32) {
         if (isPrivate) {
             return
                 keccak256(
                     abi.encodePacked(
-                        "\x19Ethereum Signed Message:\n64",
+                        "\x19Ethereum Signed Message:\n112",
                         newDataHash,
-                        oldDataHash
+                        oldDataHash,
+                        nonce
                     )
                 );
         } else {
             return
                 keccak256(
                     abi.encodePacked(
-                        "\x19Ethereum Signed Message:\n32",
-                        newDataHash
+                        "\x19Ethereum Signed Message:\n80",
+                        newDataHash,
+                        nonce
                     )
                 );
         }
@@ -122,17 +126,21 @@ contract Verifier is BaseVerifier {
         // Extract accessibility proof
         bytes memory accessibilityProof = proof[1:66];
 
+        // Extract nonce for accessibility proof
+        bytes memory nonce = proof[66:114];
+
         // Extract hashes
-        output.newDataHash = bytes32(proof[66:98]);
+        output.newDataHash = bytes32(proof[114:146]);
 
         if (isPrivate) {
-            output.oldDataHash = bytes32(proof[99:131]);
-            output.sealedKey = bytes16(proof[132:144]);
+            output.oldDataHash = bytes32(proof[146:178]);
+            output.sealedKey = bytes16(proof[178:190]);
         }
 
         output.receiver = verifyAccessibility(
             accessibilityProof,
             isPrivate,
+            nonce,
             output.newDataHash,
             output.oldDataHash
         );
@@ -181,8 +189,8 @@ contract Verifier is BaseVerifier {
             outputs[i] = output;
 
             // TODO: defend against replay attack
-            // bytes32 proofHash = hashProof(proofs[i]);
-            // _checkAndMarkProof(proofHash);
+            bytes32 proofNonce = hashNonce(proofs[i][66:114]);
+            _checkAndMarkProof(proofNonce);
         }
 
         return outputs;
