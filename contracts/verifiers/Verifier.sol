@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "./base/BaseVerifier.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
 enum VerifierType {
     TEE,
@@ -86,26 +87,25 @@ contract Verifier is BaseVerifier {
         bytes32 oldDataHash,
         bytes memory nonce
     ) private pure returns (bytes32) {
+        bytes32 messageHex;
         if (isPrivate) {
-            return
-                keccak256(
-                    abi.encodePacked(
-                        "\x19Ethereum Signed Message:\n112",
-                        newDataHash,
-                        oldDataHash,
-                        nonce
-                    )
-                );
+            messageHex = keccak256(
+                abi.encodePacked(
+                    newDataHash,
+                    oldDataHash,
+                    nonce
+                )
+            );
         } else {
-            return
-                keccak256(
-                    abi.encodePacked(
-                        "\x19Ethereum Signed Message:\n80",
-                        newDataHash,
-                        nonce
-                    )
-                );
+            messageHex = keccak256(
+                abi.encodePacked(
+                    newDataHash,
+                    nonce
+                )
+            );
         }
+        string memory message = Strings.toHexString(uint256(messageHex), 32);
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n66", message));
     }
 
     /// @notice Process a single transfer validity proof
