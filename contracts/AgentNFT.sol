@@ -5,7 +5,6 @@ import {AccessControlEnumerableUpgradeable} from "@openzeppelin/contracts-upgrad
 import {IERC7857} from "./interfaces/IERC7857.sol";
 import {IERC7857Metadata} from "./interfaces/IERC7857Metadata.sol";
 import {IERC7857DataVerifier, PreimageProofOutput, TransferValidityProofOutput} from "./interfaces/IERC7857DataVerifier.sol";
-import {Utils} from "./Utils.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
 contract AgentNFT is
@@ -29,6 +28,7 @@ contract AgentNFT is
         // Token data
         mapping(uint256 => TokenData) tokens;
         mapping(address owner => mapping(address operator => bool)) operatorApprovals;
+        mapping(address user => address realAccessor) delegateAccess;
         uint256 nextTokenId;
         // Contract metadata
         string name;
@@ -48,6 +48,9 @@ contract AgentNFT is
     }
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
+    string public constant VERSION = "2.0.0";
 
     // keccak256(abi.encode(uint(keccak256("agent.storage.AgentNFT")) - 1)) & ~bytes32(uint(0xff))
     bytes32 private constant AGENT_NFT_STORAGE_LOCATION =
@@ -73,14 +76,16 @@ contract AgentNFT is
         string memory symbol_,
         address verifierAddr,
         string memory chainURL_,
-        string memory indexerURL_
+        string memory indexerURL_,
+        address admin_
     ) public virtual initializer {
         require(verifierAddr != address(0), "Zero address");
 
         __AccessControlEnumerable_init();
 
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(ADMIN_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, admin_);
+        _grantRole(ADMIN_ROLE, admin_);
+        _grantRole(PAUSER_ROLE, admin_);
 
         AgentNFTStorage storage $ = _getAgentStorage();
         $.name = name_;
@@ -125,24 +130,24 @@ contract AgentNFT is
         TokenData storage token = $.tokens[tokenId];
         require(token.owner == msg.sender, "Not owner");
 
-        PreimageProofOutput[] memory proofOupt = $.verifier.verifyPreimage(
+        PreimageProofOutput[] memory proofOutput = $.verifier.verifyPreimage(
             proofs
         );
-        bytes32[] memory newDataHashes = new bytes32[](proofOupt.length);
+        bytes32[] memory newDataHashes = new bytes32[](proofOutput.length);
 
-        for (uint i = 0; i < proofOupt.length; i++) {
+        for (uint i = 0; i < proofOutput.length; i++) {
             require(
-                proofOupt[i].isValid,
+                proofOutput[i].isValid,
                 string(
                     abi.encodePacked(
                         "Invalid preimage proof at index ",
                         i,
                         " with data hash ",
-                        proofOupt[i].dataHash
+                        proofOutput[i].dataHash
                     )
                 )
             );
-            newDataHashes[i] = proofOupt[i].dataHash;
+            newDataHashes[i] = proofOutput[i].dataHash;
         }
 
         bytes32[] memory oldDataHashes = token.dataHashes;
@@ -167,24 +172,24 @@ contract AgentNFT is
             to = msg.sender;
         }
 
-        PreimageProofOutput[] memory proofOupt = $.verifier.verifyPreimage(
+        PreimageProofOutput[] memory proofOutput = $.verifier.verifyPreimage(
             proofs
         );
-        bytes32[] memory dataHashes = new bytes32[](proofOupt.length);
+        bytes32[] memory dataHashes = new bytes32[](proofOutput.length);
 
-        for (uint i = 0; i < proofOupt.length; i++) {
+        for (uint i = 0; i < proofOutput.length; i++) {
             require(
-                proofOupt[i].isValid,
+                proofOutput[i].isValid,
                 string(
                     abi.encodePacked(
                         "Invalid preimage proof at index ",
                         i,
                         " with data hash ",
-                        proofOupt[i].dataHash
+                        proofOutput[i].dataHash
                     )
                 )
             );
-            dataHashes[i] = proofOupt[i].dataHash;
+            dataHashes[i] = proofOutput[i].dataHash;
         }
 
         tokenId = $.nextTokenId++;
@@ -208,27 +213,30 @@ contract AgentNFT is
         require(to != address(0), "Zero address");
         require($.tokens[tokenId].owner == msg.sender, "Not owner");
 
-        TransferValidityProofOutput[] memory proofOupt = $
+        TransferValidityProofOutput[] memory proofOutput = $
             .verifier
             .verifyTransferValidity(proofs);
-        bytes16[] memory sealedKeys = new bytes16[](proofOupt.length);
-        bytes32[] memory newDataHashes = new bytes32[](proofOupt.length);
+        bytes16[] memory sealedKeys = new bytes16[](proofOutput.length);
+        bytes32[] memory newDataHashes = new bytes32[](proofOutput.length);
+        bool isPrivate = (uint8(proofs[0][0]) & 0x40) != 0;
 
-        for (uint i = 0; i < proofOupt.length; i++) {
+        for (uint i = 0; i < proofOutput.length; i++) {
+            require(proofOutput[i].isValid, "Invalid transfer validity proof");
             require(
-                proofOupt[i].isValid &&
-                    proofOupt[i].oldDataHash ==
-                    $.tokens[tokenId].dataHashes[i] &&
-                    proofOupt[i].receiver == to,
-                string(
-                    abi.encodePacked(
-                        "Invalid transfer validity proof at index ",
-                        i
-                    )
-                )
+                proofOutput[i].newDataHash ==
+                    $.tokens[tokenId].dataHashes[i],
+                "New data hash mismatch"
             );
-            sealedKeys[i] = proofOupt[i].sealedKey;
-            newDataHashes[i] = proofOupt[i].newDataHash;
+            if (isPrivate) {
+                require(proofOutput[i].receiver == to, "Receiver mismatch");
+            }
+            require(
+                proofOutput[i].realAccessor == $.delegateAccess[to] ||
+                    proofOutput[i].realAccessor == to,
+                "Accessor mismatch"
+            );
+            sealedKeys[i] = proofOutput[i].sealedKey;
+            newDataHashes[i] = proofOutput[i].newDataHash;
         }
 
         $.tokens[tokenId].owner = to;
@@ -254,47 +262,31 @@ contract AgentNFT is
             "Not approved"
         );
 
-        TransferValidityProofOutput[] memory proofOupt = $
+        bool isPrivate = (uint8(proofs[0][0]) & 0x40) != 0;
+
+        TransferValidityProofOutput[] memory proofOutput = $
             .verifier
             .verifyTransferValidity(proofs);
-        bytes16[] memory sealedKeys = new bytes16[](proofOupt.length);
-        bytes32[] memory newDataHashes = new bytes32[](proofOupt.length);
+        bytes16[] memory sealedKeys = new bytes16[](proofOutput.length);
+        bytes32[] memory newDataHashes = new bytes32[](proofOutput.length);
 
-        for (uint i = 0; i < proofOupt.length; i++) {
-            require(proofOupt[i].isValid, "Invalid transfer validity proof");
+
+        for (uint i = 0; i < proofOutput.length; i++) {
+            require(proofOutput[i].isValid, "Invalid transfer validity proof");
             require(
-                proofOupt[i].newDataHash == $.tokens[tokenId].dataHashes[i],
-                string(
-                    abi.encodePacked(
-                        "New data hash mismatch, hash in proof: ",
-                        Strings.toHexString(
-                            uint256(proofOupt[i].newDataHash),
-                            32
-                        ),
-                        ", but hash in token: ",
-                        Strings.toHexString(
-                            uint256($.tokens[tokenId].dataHashes[i]),
-                            32
-                        )
-                    )
-                )
+                proofOutput[i].newDataHash == $.tokens[tokenId].dataHashes[i],
+                "New data hash mismatch"
             );
+            if (isPrivate) {
+                require(proofOutput[i].receiver == to, "Receiver mismatch");
+            }
             require(
-                proofOupt[i].receiver == to,
-                string(
-                    abi.encodePacked(
-                        "Receiver mismatch, receiver in proof: ",
-                        Strings.toHexString(
-                            uint256(uint160(proofOupt[i].receiver)),
-                            20
-                        ),
-                        ", but transfer to: ",
-                        Strings.toHexString(uint256(uint160(to)), 20)
-                    )
-                )
+                proofOutput[i].realAccessor == $.delegateAccess[to] ||
+                    proofOutput[i].realAccessor == to,
+                "Accessor mismatch"
             );
-            sealedKeys[i] = proofOupt[i].sealedKey;
-            newDataHashes[i] = proofOupt[i].newDataHash;
+            sealedKeys[i] = proofOutput[i].sealedKey;
+            newDataHashes[i] = proofOutput[i].newDataHash;
         }
 
         $.tokens[tokenId].owner = to;
@@ -313,27 +305,31 @@ contract AgentNFT is
         require(to != address(0), "Zero address");
         require($.tokens[tokenId].owner == msg.sender, "Not owner");
 
-        TransferValidityProofOutput[] memory proofOupt = $
+        bool isPrivate = (uint8(proofs[0][0]) & 0x40) != 0;
+
+        TransferValidityProofOutput[] memory proofOutput = $
             .verifier
             .verifyTransferValidity(proofs);
-        bytes32[] memory newDataHashes = new bytes32[](proofOupt.length);
-        bytes16[] memory sealedKeys = new bytes16[](proofOupt.length);
+        bytes32[] memory newDataHashes = new bytes32[](proofOutput.length);
+        bytes16[] memory sealedKeys = new bytes16[](proofOutput.length);
 
-        for (uint i = 0; i < proofOupt.length; i++) {
+        for (uint i = 0; i < proofOutput.length; i++) {
+            require(proofOutput[i].isValid, "Invalid transfer validity proof");
             require(
-                proofOupt[i].isValid &&
-                    proofOupt[i].oldDataHash ==
-                    $.tokens[tokenId].dataHashes[i] &&
-                    proofOupt[i].receiver == to,
-                string(
-                    abi.encodePacked(
-                        "Invalid transfer validity proof at index ",
-                        i
-                    )
-                )
+                proofOutput[i].oldDataHash ==
+                    $.tokens[tokenId].dataHashes[i],
+                "Old data hash mismatch"
             );
-            sealedKeys[i] = proofOupt[i].sealedKey;
-            newDataHashes[i] = proofOupt[i].newDataHash;
+            if (isPrivate) {
+                require(proofOutput[i].receiver == to, "Receiver mismatch");
+            }
+            require(
+                proofOutput[i].realAccessor == $.delegateAccess[to] ||
+                    proofOutput[i].realAccessor == to,
+                "Accessor mismatch"
+            );
+            sealedKeys[i] = proofOutput[i].sealedKey;
+            newDataHashes[i] = proofOutput[i].newDataHash;
         }
 
         uint256 newTokenId = $.nextTokenId++;
@@ -359,6 +355,7 @@ contract AgentNFT is
         AgentNFTStorage storage $ = _getAgentStorage();
         require(to != address(0), "Zero address");
         require($.tokens[tokenId].owner == from, "Not owner");
+
         require(
             $.tokens[tokenId].approvedUser == msg.sender ||
                 $.tokens[tokenId].owner == msg.sender ||
@@ -366,27 +363,32 @@ contract AgentNFT is
             "Not approved"
         );
 
-        TransferValidityProofOutput[] memory proofOupt = $
+        TransferValidityProofOutput[] memory proofOutput = $
             .verifier
             .verifyTransferValidity(proofs);
-        bytes32[] memory newDataHashes = new bytes32[](proofOupt.length);
-        bytes16[] memory sealedKeys = new bytes16[](proofOupt.length);
+        bytes32[] memory newDataHashes = new bytes32[](proofOutput.length);
+        bytes16[] memory sealedKeys = new bytes16[](proofOutput.length);
 
-        for (uint i = 0; i < proofOupt.length; i++) {
+        bool isPrivate = (uint8(proofs[0][0]) & 0x40) != 0;
+
+        for (uint i = 0; i < proofOutput.length; i++) {
+            require(proofOutput[i].isValid, "Invalid transfer validity proof");
             require(
-                proofOupt[i].isValid &&
-                    proofOupt[i].oldDataHash ==
-                    $.tokens[tokenId].dataHashes[i] &&
-                    proofOupt[i].receiver == to,
-                string(
-                    abi.encodePacked(
-                        "Invalid transfer validity proof at index ",
-                        i
-                    )
-                )
+                proofOutput[i].oldDataHash ==
+                    $.tokens[tokenId].dataHashes[i],
+                "Old data hash mismatch"
             );
-            sealedKeys[i] = proofOupt[i].sealedKey;
-            newDataHashes[i] = proofOupt[i].newDataHash;
+            if (isPrivate) {
+                require(proofOutput[i].receiver == to, "Receiver mismatch");
+            }
+            require(
+                proofOutput[i].realAccessor == $.delegateAccess[to] ||
+                    proofOutput[i].realAccessor == to,
+                "Accessor mismatch"
+            );
+
+            sealedKeys[i] = proofOutput[i].sealedKey;
+            newDataHashes[i] = proofOutput[i].newDataHash;
         }
 
         uint256 newTokenId = $.nextTokenId++;
@@ -494,5 +496,13 @@ contract AgentNFT is
         return $.operatorApprovals[owner][operator];
     }
 
-    string public constant VERSION = "1.0.0";
+    function delegateAccess(address realAccessor) public virtual {
+        AgentNFTStorage storage $ = _getAgentStorage();
+        $.delegateAccess[msg.sender] = realAccessor;
+    }
+
+    function getDelegateAccess(address user) public view virtual returns (address) {
+        AgentNFTStorage storage $ = _getAgentStorage();
+        return $.delegateAccess[user];
+    }
 }

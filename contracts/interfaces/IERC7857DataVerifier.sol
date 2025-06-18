@@ -13,6 +13,7 @@ struct TransferValidityProofOutput {
     bytes32 oldDataHash;
     bytes32 newDataHash;
     address receiver;
+    address realAccessor;
     bytes16 sealedKey;
     bool isValid;
 }

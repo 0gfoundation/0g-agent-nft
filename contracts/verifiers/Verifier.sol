@@ -3,23 +3,87 @@ pragma solidity ^0.8.20;
 
 import "./base/BaseVerifier.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 enum VerifierType {
     TEE,
     ZKP
 }
 
-contract Verifier is BaseVerifier {
-    address public immutable attestationContract;
-    VerifierType public immutable verifierType;
+contract Verifier is
+    BaseVerifier,
+    Initializable,
+    AccessControlUpgradeable,
+    PausableUpgradeable
+{
+    using ECDSA for bytes32;
+    using MessageHashUtils for bytes32;
+    
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
-    constructor(address _attestationContract, VerifierType _verifierType) {
+    address public attestationContract;
+    VerifierType public verifierType;
+
+    uint256 public maxProofAge;
+
+    string public constant VERSION = "2.0.0";
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
+        address _attestationContract,
+        VerifierType _verifierType,
+        address _admin
+    ) external initializer {
+        __AccessControl_init();
+        __Pausable_init();
+
         attestationContract = _attestationContract;
         verifierType = _verifierType;
+        maxProofAge = 7 days;
+
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+        _grantRole(ADMIN_ROLE, _admin);
+        _grantRole(PAUSER_ROLE, _admin);
+    }
+
+    function updateAttestationContract(
+        address _attestationContract
+    ) external onlyRole(ADMIN_ROLE) {
+        attestationContract = _attestationContract;
+    }
+
+    function updateMaxProofAge(
+        uint256 _maxProofAge
+    ) external onlyRole(ADMIN_ROLE) {
+        maxProofAge = _maxProofAge;
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
     }
 
     function hashNonce(bytes memory nonce) private pure returns (bytes32) {
         return keccak256(nonce);
+    }
+
+    function _mockTeeVerifierVerify(
+        bytes32 dataHash,
+        bytes memory signature
+    ) internal pure returns (bool) {
+        return true;
     }
 
     /// @notice Verify preimage of data, the _proof prove:
@@ -62,18 +126,42 @@ contract Verifier is BaseVerifier {
             "Invalid accessibility proof length"
         );
 
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        assembly {
-            r := mload(add(accessibilityProof, 32))
-            s := mload(add(accessibilityProof, 64))
-            v := byte(0, mload(add(accessibilityProof, 96)))
+        bytes32 messageHash = createMessageHash(
+            isPrivate,
+            newDataHash,
+            oldDataHash,
+            nonce
+        );
+        
+        return messageHash.recover(accessibilityProof);
+    }
+
+    function verfifyOwnershipProof(
+        bytes memory ownershipProof,
+        bytes memory nonce,
+        bytes32 newDataHash,
+        bytes32 oldDataHash,
+        bytes16 sealedKey,
+        address receiver,
+        bool isTEE
+    ) private pure returns (bool) {
+        if (isTEE) {
+            bytes32 ownershipHashHex = keccak256(
+                abi.encodePacked(nonce, newDataHash, oldDataHash, sealedKey, receiver)
+            );
+
+            string memory message = Strings.toHexString(
+                uint256(ownershipHashHex),
+                32
+            );
+            bytes32 ethSignedHash = keccak256(
+                abi.encodePacked("\x19Ethereum Signed Message:\n66", message)
+            );
+
+            return _mockTeeVerifierVerify(ethSignedHash, ownershipProof);
+        } else {
+            return true;
         }
-
-        bytes32 messageHash = createMessageHash(isPrivate, newDataHash, oldDataHash, nonce);
-
-        return ecrecover(messageHash, v, r, s);
     }
 
     /// @notice Create the message hash for signature verification
@@ -90,22 +178,16 @@ contract Verifier is BaseVerifier {
         bytes32 messageHex;
         if (isPrivate) {
             messageHex = keccak256(
-                abi.encodePacked(
-                    newDataHash,
-                    oldDataHash,
-                    nonce
-                )
+                abi.encodePacked(newDataHash, oldDataHash, nonce)
             );
         } else {
-            messageHex = keccak256(
-                abi.encodePacked(
-                    newDataHash,
-                    nonce
-                )
-            );
+            messageHex = keccak256(abi.encodePacked(newDataHash, nonce));
         }
         string memory message = Strings.toHexString(uint256(messageHex), 32);
-        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n66", message));
+        return
+            keccak256(
+                abi.encodePacked("\x19Ethereum Signed Message:\n66", message)
+            );
     }
 
     /// @notice Process a single transfer validity proof
@@ -127,35 +209,48 @@ contract Verifier is BaseVerifier {
         bytes memory accessibilityProof = proof[1:66];
 
         // Extract nonce for accessibility proof
-        bytes memory nonce = proof[66:114];
+        bytes memory accessProofNonce = proof[66:114];
 
         // Extract hashes
         output.newDataHash = bytes32(proof[114:146]);
 
         if (isPrivate) {
-            output.oldDataHash = bytes32(proof[146:178]);
-            output.sealedKey = bytes16(proof[178:190]);
+            output.oldDataHash = bytes32(proof[194:226]);
+            output.sealedKey = bytes16(proof[226:242]);
         }
 
-        output.receiver = verifyAccessibility(
+        output.realAccessor = verifyAccessibility(
             accessibilityProof,
             isPrivate,
-            nonce,
+            accessProofNonce,
             output.newDataHash,
             output.oldDataHash
         );
-        bool isAccess = output.receiver != address(0);
+        
+        require(output.realAccessor != address(0), "Invalid real accessor");
 
-        // TODO: verify the proofs
-        // 1. verify TEE's signature
         bool isValid = true;
+
         if (isPrivate) {
+            bytes memory ownershipProofNonce = proof[146:194];
+            address receiver = address(bytes20(proof[242:252]));
+            output.receiver = receiver;
+            bytes memory ownershipProof = proof[252:];
+            isValid = verfifyOwnershipProof(
+                ownershipProof,
+                ownershipProofNonce,
+                output.newDataHash,
+                output.oldDataHash,
+                output.sealedKey,
+                receiver,
+                isTEE
+            );
             // verify ownership proof
             // remember to verify the key to encrypt the sealedKey is receiver's pubKey
             // verifyOwnershipProof(ownershipProof, isTEE, output.newDataHash, output.oldDataHash, output.sealedKey);
         }
 
-        output.isValid = isValid && isAccess;
+        output.isValid = isValid;
         return output;
     }
 
@@ -170,13 +265,22 @@ contract Verifier is BaseVerifier {
     /// The second 1 bit is the proof type, 0 for public data, 1 for private data
     /// The 2~7 bits are reserved for future use
     /// The 1~65 bytes are the accessibility proof
-    /// The 66~98 bytes are the newDataHashes
-    /// If private data, 99~131 bytes are the oldDataHashes
-    /// If private data, 132~144 bytes are the sealedKey
+    /// The 66~113 bytes are the access proof nonce
+    /// The 114~145 bytes are the newDataHashes
+    /// If private data, 146~193 bytes are the ownership proof nonce
+    /// If private data, 194~225 bytes are the oldDataHashes
+    /// If private data, 226~241 bytes are the sealedKey,
+    /// If private data, 242~251 bytes are the receiver's address
     /// If private data, the rest of the proof from the oracle
     function verifyTransferValidity(
         bytes[] calldata proofs
-    ) public virtual returns (TransferValidityProofOutput[] memory) {
+    )
+        public
+        virtual
+        override
+        whenNotPaused
+        returns (TransferValidityProofOutput[] memory)
+    {
         TransferValidityProofOutput[]
             memory outputs = new TransferValidityProofOutput[](proofs.length);
 
@@ -188,11 +292,18 @@ contract Verifier is BaseVerifier {
             // Create the output
             outputs[i] = output;
 
-            // TODO: defend against replay attack
-            bytes32 proofNonce = hashNonce(proofs[i][66:114]);
-            _checkAndMarkProof(proofNonce);
+            bytes32 accessProofNonce = hashNonce(proofs[i][66:114]);
+            _checkAndMarkProof(accessProofNonce);
+
+            bool isPrivate = (uint8(proofs[i][0]) & 0x40) != 0; 
+            if (isPrivate) {
+                bytes32 ownershipProofNonce = hashNonce(proofs[i][146:194]);
+                _checkAndMarkProof(ownershipProofNonce);
+            }
         }
 
         return outputs;
     }
+
+    uint256[50] private __gap;
 }

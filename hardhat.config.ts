@@ -54,7 +54,7 @@ const config: HardhatUserConfig = {
     zgTestnet: {
       url: ZG_RPC_URL || "",
       accounts: [ZG_TESTNET_PRIVATE_KEY || ""],
-      chainId: 80087,
+      chainId: 16601,
       live: true,
       saveDeployments: true,
       tags: ["staging"]
