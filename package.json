@@ -9,7 +9,8 @@
     "verify": "hardhat verify",
     "coverage": "hardhat coverage",
     "upgrade": "hardhat run scripts/upgrade.ts --network",
-    "clean-stuck-tx": "ts-node scripts/clean_stuck_tx.ts"
+    "clean-stuck-tx": "ts-node scripts/clean_stuck_tx.ts",
+    "generate-external-types": "npx typechain --target=ethers-v6 --out-dir=external-types/contracts ./build/artifacts/contracts/AgentNFT.sol/AgentNFT.json ./build/artifacts/contracts/AgentMarket.sol/AgentMarket.json"
   },
   "keywords": [],
   "author": "wei <wei.wu.life@gmail.com>",

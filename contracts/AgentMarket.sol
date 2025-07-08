@@ -31,6 +31,7 @@ contract AgentMarket is
     address public agentNFT;
 
     mapping(address => uint256) public feeBalances;
+    mapping(address => uint256) public balances;
     mapping(uint256 => bool) public usedOrders;
     mapping(uint256 => bool) public usedOffers;
 
@@ -102,7 +103,7 @@ contract AgentMarket is
         feeBalances[currency] = 0;
 
         if (currency == address(0)) {
-            // withdraw ETH
+            // withdraw A0GI
             payable(admin).transfer(amount);
         } else {
             // withdraw ERC20
@@ -129,19 +130,19 @@ contract AgentMarket is
 
         // 2. transfer iNFT
         if (proofs.length > 0) {
-            AgentNFT(agentNFT).iTransferFrom(seller, buyer, order.tokenId, proofs);
+            AgentNFT(agentNFT).iTransferFrom(
+                seller,
+                buyer,
+                order.tokenId,
+                proofs
+            );
         } else {
             AgentNFT(agentNFT).transferFrom(seller, buyer, order.tokenId);
         }
 
-        // 3. transfer erc20 token
+        // 3. transfer erc20 token or A0GI
         if (offer.offerPrice > 0) {
-            _handlePayment(
-                offer.offerPrice,
-                order.currency,
-                buyer,
-                seller
-            );
+            _handlePayment(offer.offerPrice, order.currency, buyer, seller);
         }
 
         if (order.receiver != address(0)) {
@@ -158,6 +159,16 @@ contract AgentMarket is
             offer.offerPrice,
             order.currency
         );
+    }
+
+    function deposit(address account) external payable {
+        balances[account] += msg.value;
+    }
+
+    function withdraw(address account) external {
+        require(balances[account] > 0, "No balance to withdraw");
+        balances[account] = 0;
+        payable(account).transfer(balances[account]);
     }
 
     function _validateOrder(
@@ -184,14 +195,8 @@ contract AgentMarket is
         Offer calldata offer,
         Order calldata order
     ) internal view returns (address) {
-        require(
-            block.timestamp <= offer.expireTime,
-            "Offer expired"
-        );
-        require(
-            offer.offerPrice >= order.expectedPrice,
-            "Price too low"
-        );
+        require(block.timestamp <= offer.expireTime, "Offer expired");
+        require(offer.offerPrice >= order.expectedPrice, "Price too low");
         require(offer.tokenId == order.tokenId, "TokenId mismatch");
 
         address buyer = _verifyOfferSignature(offer);
@@ -238,10 +243,7 @@ contract AgentMarket is
             )
         );
 
-        string memory message = Strings.toHexString(
-            uint256(offerHashHex),
-            32
-        );
+        string memory message = Strings.toHexString(uint256(offerHashHex), 32);
         bytes32 ethSignedHash = keccak256(
             abi.encodePacked("\x19Ethereum Signed Message:\n66", message)
         );
@@ -261,10 +263,15 @@ contract AgentMarket is
         uint256 sellerAmount = totalAmount - fee;
 
         IERC20 token = IERC20(currency);
-
-        token.transferFrom(buyer, seller, sellerAmount);
-
-        token.transferFrom(buyer, address(this), fee);
+        // native token
+        if (currency == address(0)) {
+            require(balances[buyer] >= totalAmount, "Insufficient balance");
+            payable(seller).transfer(sellerAmount);
+            balances[buyer] -= totalAmount;
+        } else {
+            token.transferFrom(buyer, seller, sellerAmount);
+            token.transferFrom(buyer, address(this), fee);
+        }
         feeBalances[currency] += fee;
     }
 

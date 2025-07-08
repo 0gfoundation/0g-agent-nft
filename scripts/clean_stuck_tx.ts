@@ -6,17 +6,15 @@ dotenv.config();
 async function directRPCClear() {
     console.log("=== Direct RPC Clear (Bypass Hardhat) ===");
     
-    // 直接连接 RPC，不通过 Hardhat
     const provider = new ethers.JsonRpcProvider("https://evmrpc-testnet.0g.ai");
     
-    if (!process.env.ZG_TESTNET_PRIVATE_KEY) {
+    if (!process.env.ZG_AGENT_NFT_BOB_PRIVATE_KEY) {
         throw new Error("ZG_TESTNET_PRIVATE_KEY environment variable not set");
     }
     
-    const wallet = new ethers.Wallet(process.env.ZG_TESTNET_PRIVATE_KEY, provider);
+    const wallet = new ethers.Wallet(process.env.ZG_AGENT_NFT_BOB_PRIVATE_KEY, provider);
     console.log("Wallet address:", wallet.address);
     
-    // 直接查询 nonce
     const latestNonce = await provider.getTransactionCount(wallet.address, "latest");
     const pendingNonce = await provider.getTransactionCount(wallet.address, "pending");
     
@@ -34,24 +32,22 @@ async function directRPCClear() {
     console.log(`🔧 Clearing ${stuckCount} stuck transactions...`);
     console.log(`Will replace nonces ${latestNonce} to ${pendingNonce - 1}`);
     
-    // 清理每个卡住的 nonce
     for (let i = 0; i < stuckCount; i++) {
         const nonce = latestNonce + i;
         console.log(`\n🚀 Clearing nonce ${nonce} (0x${nonce.toString(16)})...`);
         
         try {
             const tx = await wallet.sendTransaction({
-                to: wallet.address, // 发送给自己
+                to: wallet.address,
                 value: 0,
                 nonce: nonce,
-                maxFeePerGas: ethers.parseUnits("120", "gwei"), // 高 gas 费
+                maxFeePerGas: ethers.parseUnits("120", "gwei"),
                 maxPriorityFeePerGas: ethers.parseUnits("25", "gwei"),
                 gasLimit: 21000
             });
             
             console.log(`✅ Replacement transaction sent: ${tx.hash}`);
             
-            // 可选：等待这个交易确认
             // console.log("⏳ Waiting for confirmation...");
             // await tx.wait(1);
             // console.log("✅ Confirmed");
@@ -79,17 +75,14 @@ async function directRPCClear() {
             }
         }
         
-        // 等待 3 秒避免 RPC 限制
         await new Promise(resolve => setTimeout(resolve, 3000));
     }
     
     console.log("\n📊 All replacement transactions sent!");
     console.log("⏰ Waiting 3 minutes for network to process...");
     
-    // 等待足够长的时间
-    await new Promise(resolve => setTimeout(resolve, 180000)); // 3分钟
+    await new Promise(resolve => setTimeout(resolve, 180000));
     
-    // 检查最终状态
     console.log("🔍 Checking final status...");
     const finalLatest = await provider.getTransactionCount(wallet.address, "latest");
     const finalPending = await provider.getTransactionCount(wallet.address, "pending");
@@ -106,7 +99,6 @@ async function directRPCClear() {
         console.log("⚠️ Some transactions may still be pending");
         console.log("💡 Consider waiting longer or using even higher gas fees");
         
-        // 显示具体哪些 nonce 还卡住
         const stillStuck = finalPending - finalLatest;
         console.log(`📋 Nonces ${finalLatest} to ${finalPending - 1} (${stillStuck} total) are still stuck`);
     }
