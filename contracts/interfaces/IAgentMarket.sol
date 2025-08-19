@@ -40,6 +40,8 @@ interface IAgentMarket {
     event FeeRateUpdated(uint256 oldFeeRate, uint256 newFeeRate);
     event ContractPaused(address indexed admin);
     event ContractUnpaused(address indexed admin);
+    event Deposit(address indexed account, uint256 balance);
+    event Withdraw(address indexed account, uint256 balance);
 
     function admin() external view returns (address);
     function setAdmin(address newAdmin) external;

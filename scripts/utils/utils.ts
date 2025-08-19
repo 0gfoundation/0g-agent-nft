@@ -25,7 +25,7 @@ export const PAUSER_ROLE = ethers.id("PAUSER_ROLE");
 export const UNFROZEN_ROLE = ethers.id("UNFROZEN_ROLE");
 
 interface TypechainFactory<T> {
-    new (...args: ConstructorParameters<typeof ContractFactory>): ContractFactory;
+    new(...args: ConstructorParameters<typeof ContractFactory>): ContractFactory;
     connect: (address: string, runner?: ContractRunner | null) => T;
 }
 
@@ -47,6 +47,7 @@ export const CONTRACTS = {
     Verifier: new ContractMeta(Factories.Verifier__factory),
     AgentNFT: new ContractMeta(Factories.AgentNFT__factory),
     AgentMarket: new ContractMeta(Factories.AgentMarket__factory),
+    TEEVerifier: new ContractMeta(Factories.TEEVerifier__factory),
 } as const;
 
 export async function deployDirectly(

@@ -62,10 +62,7 @@ contract AgentNFT is
         bytes[] _sealedKeys
     );
 
-    event DelegateAccess(
-        address indexed _user,
-        address indexed _assistant
-    );
+    event DelegateAccess(address indexed _user, address indexed _assistant);
 
     struct TokenData {
         address owner;
@@ -156,13 +153,18 @@ contract AgentNFT is
         _getAgentStorage().verifier = IERC7857DataVerifier(newVerifier);
     }
 
-    function update(uint256 tokenId, IntelligentData[] calldata newDatas) public virtual {
+    function update(
+        uint256 tokenId,
+        IntelligentData[] calldata newDatas
+    ) public virtual {
         AgentNFTStorage storage $ = _getAgentStorage();
         TokenData storage token = $.tokens[tokenId];
         require(token.owner == msg.sender, "Not owner");
         require(newDatas.length > 0, "Empty data array");
-  
-        IntelligentData[] memory oldDatas = new IntelligentData[](token.iDatas.length);
+
+        IntelligentData[] memory oldDatas = new IntelligentData[](
+            token.iDatas.length
+        );
         for (uint i = 0; i < token.iDatas.length; i++) {
             oldDatas[i] = token.iDatas[i];
         }
@@ -182,14 +184,14 @@ contract AgentNFT is
     ) public payable virtual returns (uint256 tokenId) {
         require(to != address(0), "Zero address");
         require(iDatas.length > 0, "Empty data array");
-        
+
         AgentNFTStorage storage $ = _getAgentStorage();
 
         tokenId = $.nextTokenId++;
         TokenData storage newToken = $.tokens[tokenId];
         newToken.owner = to;
         newToken.approvedUser = address(0);
-        
+
         for (uint i = 0; i < iDatas.length; i++) {
             newToken.iDatas.push(iDatas[i]);
         }
@@ -215,11 +217,14 @@ contract AgentNFT is
             .verifier
             .verifyTransferValidity(proofs);
 
-        require(proofOutput.length == $.tokens[tokenId].iDatas.length, "Proof count mismatch");
+        require(
+            proofOutput.length == $.tokens[tokenId].iDatas.length,
+            "Proof count mismatch"
+        );
 
         sealedKeys = new bytes[](proofOutput.length);
         newDatas = new IntelligentData[](proofOutput.length);
-        
+
         for (uint i = 0; i < proofOutput.length; i++) {
             // require the initial data hash is the same as the old data hash
             require(
@@ -270,22 +275,20 @@ contract AgentNFT is
         TransferValidityProof[] calldata proofs
     ) internal {
         AgentNFTStorage storage $ = _getAgentStorage();
-        (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) = _proofCheck(
-            from,
-            to,
-            tokenId,
-            proofs
-        );
+        (
+            bytes[] memory sealedKeys,
+            IntelligentData[] memory newDatas
+        ) = _proofCheck(from, to, tokenId, proofs);
 
         TokenData storage token = $.tokens[tokenId];
         token.owner = to;
         token.approvedUser = address(0);
-        
+
         delete token.iDatas;
         for (uint i = 0; i < newDatas.length; i++) {
             token.iDatas.push(newDatas[i]);
         }
-        
+
         emit Transferred(tokenId, from, to);
         emit PublishedSealedKey(to, tokenId, sealedKeys);
     }
@@ -332,18 +335,16 @@ contract AgentNFT is
     ) internal returns (uint256) {
         AgentNFTStorage storage $ = _getAgentStorage();
 
-        (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) = _proofCheck(
-            from,
-            to,
-            tokenId,
-            proofs
-        );
+        (
+            bytes[] memory sealedKeys,
+            IntelligentData[] memory newDatas
+        ) = _proofCheck(from, to, tokenId, proofs);
 
         uint256 newTokenId = $.nextTokenId++;
         TokenData storage newToken = $.tokens[newTokenId];
         newToken.owner = to;
         newToken.approvedUser = address(0);
-        
+
         for (uint i = 0; i < newDatas.length; i++) {
             newToken.iDatas.push(newDatas[i]);
         }
@@ -377,12 +378,12 @@ contract AgentNFT is
         require(to != address(0), "Zero address");
         AgentNFTStorage storage $ = _getAgentStorage();
         require($.tokens[tokenId].owner == msg.sender, "Not owner");
-        
+
         address[] storage authorizedUsers = $.tokens[tokenId].authorizedUsers;
         for (uint i = 0; i < authorizedUsers.length; i++) {
             require(authorizedUsers[i] != to, "Already authorized");
         }
-        
+
         authorizedUsers.push(to);
         emit Authorization(msg.sender, to, tokenId);
     }
@@ -465,17 +466,25 @@ contract AgentNFT is
         return _getAgentStorage().accessAssistants[user];
     }
 
-    function _isApprovedOrOwner(address spender, uint256 tokenId) internal view returns (bool) {
+    function _isApprovedOrOwner(
+        address spender,
+        uint256 tokenId
+    ) internal view returns (bool) {
         require(_exists(tokenId), "Token does not exist");
         address owner = ownerOf(tokenId);
-        return (spender == owner || getApproved(tokenId) == spender || isApprovedForAll(owner, spender));
+        return (spender == owner ||
+            getApproved(tokenId) == spender ||
+            isApprovedForAll(owner, spender));
     }
 
-    function batchAuthorizeUsage(uint256 tokenId, address[] calldata users) public virtual {
+    function batchAuthorizeUsage(
+        uint256 tokenId,
+        address[] calldata users
+    ) public virtual {
         require(users.length > 0, "Empty users array");
         AgentNFTStorage storage $ = _getAgentStorage();
         require($.tokens[tokenId].owner == msg.sender, "Not owner");
-        
+
         for (uint i = 0; i < users.length; i++) {
             require(users[i] != address(0), "Zero address in users");
             $.tokens[tokenId].authorizedUsers.push(users[i]);
@@ -486,11 +495,13 @@ contract AgentNFT is
     function revokeAuthorization(uint256 tokenId, address user) public virtual {
         AgentNFTStorage storage $ = _getAgentStorage();
         require($.tokens[tokenId].owner == msg.sender, "Not owner");
-        
+
         address[] storage authorizedUsers = $.tokens[tokenId].authorizedUsers;
         for (uint i = 0; i < authorizedUsers.length; i++) {
             if (authorizedUsers[i] == user) {
-                authorizedUsers[i] = authorizedUsers[authorizedUsers.length - 1];
+                authorizedUsers[i] = authorizedUsers[
+                    authorizedUsers.length - 1
+                ];
                 authorizedUsers.pop();
                 break;
             }

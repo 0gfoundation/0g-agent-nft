@@ -166,12 +166,21 @@ contract AgentMarket is
         require(account != address(0), "Invalid address");
         require(!paused(), "Contract is paused");
         balances[account] += msg.value;
+        emit Deposit(account, balances[account]);
     }
 
     function withdraw(address account) external {
         require(balances[account] > 0, "No balance to withdraw");
+        require(account != address(0), "Invalid address");
+        require(!paused(), "Contract is paused");
+        uint256 amount = balances[account];
         balances[account] = 0;
-        payable(account).transfer(balances[account]);
+        payable(account).transfer(amount);
+        emit Withdraw(account, amount);
+    }
+
+    function getBalance(address account) external view returns (uint256) {
+        return balances[account];
     }
 
     function _validateOrder(

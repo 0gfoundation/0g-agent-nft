@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "./base/BaseVerifier.sol";
 import "../interfaces/IERC7857DataVerifier.sol";
+import "../TeeVerifier.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
@@ -91,11 +92,15 @@ contract Verifier is
         return keccak256(nonce);
     }
 
-    function _mockTeeOracleVerify(
+    function teeOracleVerify(
         bytes32 messageHash,
         bytes memory signature
-    ) internal pure returns (bool) {
-        return true;
+    ) internal view returns (bool) {
+        return
+            TEEVerifier(attestationContract[OracleType.TEE]).verifyTEESignature(
+                messageHash,
+                signature
+            );
     }
 
     /// @notice Extract and verify signature from the access proof
@@ -130,7 +135,7 @@ contract Verifier is
 
     function verfifyOwnershipProof(
         OwnershipProof memory ownershipProof
-    ) private pure returns (bool) {
+    ) private view returns (bool) {
         if (ownershipProof.oracleType == OracleType.TEE) {
             bytes32 messageHash = keccak256(
                 abi.encodePacked(
@@ -152,7 +157,7 @@ contract Verifier is
                 )
             );
 
-            return _mockTeeOracleVerify(messageHash, ownershipProof.proof);
+            return teeOracleVerify(messageHash, ownershipProof.proof);
         }
         // TODO: add ZKP verification
         else {
@@ -165,7 +170,7 @@ contract Verifier is
     /// @return output The processed proof data as a struct
     function processTransferProof(
         TransferValidityProof calldata proof
-    ) private pure returns (TransferValidityProofOutput memory output) {
+    ) private view returns (TransferValidityProofOutput memory output) {
         // compare the proof data in access proof and ownership proof
         require(
             proof.accessProof.oldDataHash == proof.ownershipProof.oldDataHash,

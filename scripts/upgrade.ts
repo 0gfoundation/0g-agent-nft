@@ -1,9 +1,11 @@
 import { ethers } from "hardhat";
 
 interface UpgradeConfig {
+    upgradeTEEVerifier: boolean;
     upgradeVerifier: boolean;
     upgradeAgentNFT: boolean;
     upgradeAgentMarket: boolean;
+    teeVerifierProxyAddress?: string;
     verifierProxyAddress?: string;
     agentNFTProxyAddress?: string;
     agentMarketProxyAddress?: string;
@@ -24,33 +26,33 @@ async function upgradeContract(
 ): Promise<boolean> {
     try {
         console.log(`\n=== Upgrading ${contractName} ===`);
-        
+
         // 1. get the beacon address
         const beaconAddress = await getBeaconAddress(proxyAddress);
         console.log(`${contractName} Beacon address:`, beaconAddress);
-        
+
         // 2. get the beacon contract instance
         const beacon = await ethers.getContractAt("UpgradeableBeacon", beaconAddress);
-        
+
         // 3. verify the permission
         const [deployer] = await ethers.getSigners();
         const owner = await beacon.owner();
         if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
             throw new Error(`Not authorized to upgrade ${contractName}. Owner: ${owner}, Deployer: ${deployer.address}`);
         }
-        
+
         // 4. execute the upgrade
         console.log(`Upgrading ${contractName} to:`, newImplementationAddress);
         const upgradeTx = await beacon.upgradeTo(newImplementationAddress);
         await upgradeTx.wait();
-        
+
         // 5. verify the upgrade
         const currentImpl = await beacon.implementation();
         const success = currentImpl.toLowerCase() === newImplementationAddress.toLowerCase();
-        
+
         console.log(`${contractName} upgrade ${success ? 'successful' : 'failed'}`);
         console.log(`Current implementation:`, currentImpl);
-        
+
         return success;
     } catch (error) {
         console.error(`Error upgrading ${contractName}:`, error);
@@ -65,7 +67,7 @@ async function performSafetyChecks(
 ): Promise<boolean> {
     try {
         console.log(`\n=== Safety Checks for ${contractName} ===`);
-        
+
         // 1. check if the new implementation contract is deployed
         const code = await ethers.provider.getCode(newImplementationAddress);
         if (code === "0x") {
@@ -73,7 +75,7 @@ async function performSafetyChecks(
             return false;
         }
         console.log("✅ Implementation contract has code");
-        
+
         // 2. check if the proxy contract exists
         const proxyCode = await ethers.provider.getCode(proxyAddress);
         if (proxyCode === "0x") {
@@ -81,11 +83,16 @@ async function performSafetyChecks(
             return false;
         }
         console.log("✅ Proxy contract exists");
-        
-        const contract = await ethers.getContractAt(contractName, proxyAddress);
-        const version = await contract.VERSION();
-        console.log("✅ Contract version:", version);
-        
+
+        // 3. check contract version (now all contracts have VERSION)
+        try {
+            const contract = await ethers.getContractAt(contractName, proxyAddress);
+            const version = await contract.VERSION();
+            console.log("✅ Contract version:", version);
+        } catch (error) {
+            console.warn("⚠️ Could not read contract version:", error);
+        }
+
         return true;
     } catch (error) {
         console.error(`Safety check failed for ${contractName}:`, error);
@@ -96,9 +103,11 @@ async function performSafetyChecks(
 async function main() {
     // configure the upgrade parameters
     const config: UpgradeConfig = {
+        upgradeTEEVerifier: true,
         upgradeVerifier: true,
         upgradeAgentNFT: true,
         upgradeAgentMarket: true,
+        teeVerifierProxyAddress: process.env.TEE_VERIFIER_PROXY_ADDRESS,
         verifierProxyAddress: process.env.VERIFIER_PROXY_ADDRESS,
         agentNFTProxyAddress: process.env.AGENT_NFT_PROXY_ADDRESS,
         agentMarketProxyAddress: process.env.AGENT_MARKET_PROXY_ADDRESS,
@@ -109,13 +118,50 @@ async function main() {
     console.log("Configuration:", config);
 
     const results = {
+        teeVerifierUpgrade: false,
         verifierUpgrade: false,
         agentNFTUpgrade: false,
         agentMarketUpgrade: false
     };
 
     try {
-        // 1. upgrade Verifier
+        // 1. upgrade TEEVerifier (first, as it's a dependency)
+        if (config.upgradeTEEVerifier) {
+            if (!config.teeVerifierProxyAddress) {
+                console.error("❌ TEEVerifier proxy address not provided");
+                return;
+            }
+
+            console.log("\n📋 Deploying new TEEVerifier implementation...");
+
+            const TEEVerifierFactory = await ethers.getContractFactory("TEEVerifier");
+            const newTEEVerifierImpl = await TEEVerifierFactory.deploy(); // 可升级合约不需要构造函数参数
+            await newTEEVerifierImpl.waitForDeployment();
+            const teeVerifierImplAddress = await newTEEVerifierImpl.getAddress();
+            console.log("✅ New TEEVerifier implementation:", teeVerifierImplAddress);
+
+            // safety checks
+            if (config.performSafetyChecks) {
+                const safetyCheck = await performSafetyChecks(
+                    "TEEVerifier",
+                    config.teeVerifierProxyAddress,
+                    teeVerifierImplAddress
+                );
+                if (!safetyCheck) {
+                    console.error("❌ TEEVerifier safety checks failed");
+                    return;
+                }
+            }
+
+            // execute the upgrade
+            results.teeVerifierUpgrade = await upgradeContract(
+                "TEEVerifier",
+                config.teeVerifierProxyAddress,
+                teeVerifierImplAddress
+            );
+        }
+
+        // 2. upgrade Verifier
         if (config.upgradeVerifier) {
             if (!config.verifierProxyAddress) {
                 console.error("❌ Verifier proxy address not provided");
@@ -150,7 +196,7 @@ async function main() {
             );
         }
 
-        // 2. upgrade AgentNFT
+        // 3. upgrade AgentNFT
         if (config.upgradeAgentNFT) {
             if (!config.agentNFTProxyAddress) {
                 console.error("❌ AgentNFT proxy address not provided");
@@ -185,7 +231,7 @@ async function main() {
             );
         }
 
-        // 3. upgrade AgentMarket
+        // 4. upgrade AgentMarket
         if (config.upgradeAgentMarket) {
             if (!config.agentMarketProxyAddress) {
                 console.error("❌ AgentMarket proxy address not provided");
@@ -220,9 +266,19 @@ async function main() {
             );
         }
 
-        // 4. final verification
+        // 5. final verification
         console.log("\n=== Final Verification ===");
-        
+
+        if (config.upgradeTEEVerifier && config.teeVerifierProxyAddress) {
+            try {
+                const teeVerifier = await ethers.getContractAt("TEEVerifier", config.teeVerifierProxyAddress);
+                const version = await teeVerifier.VERSION();
+                console.log("✅ TEEVerifier version after upgrade:", version);
+            } catch (error) {
+                console.warn("⚠️ Could not verify TEEVerifier after upgrade:", error);
+            }
+        }
+
         if (config.upgradeVerifier && config.verifierProxyAddress) {
             try {
                 const verifier = await ethers.getContractAt("Verifier", config.verifierProxyAddress);
@@ -253,16 +309,18 @@ async function main() {
             }
         }
 
-        // 4. summary
+        // 6. summary
         console.log("\n=== Upgrade Summary ===");
+        console.log("TEEVerifier upgrade:", results.teeVerifierUpgrade ? "✅ Success" : "❌ Failed/Skipped");
         console.log("Verifier upgrade:", results.verifierUpgrade ? "✅ Success" : "❌ Failed/Skipped");
         console.log("AgentNFT upgrade:", results.agentNFTUpgrade ? "✅ Success" : "❌ Failed/Skipped");
         console.log("AgentMarket upgrade:", results.agentMarketUpgrade ? "✅ Success" : "❌ Failed/Skipped");
-        
-        const overallSuccess = (!config.upgradeVerifier || results.verifierUpgrade) && 
-                              (!config.upgradeAgentNFT || results.agentNFTUpgrade) &&
-                              (!config.upgradeAgentMarket || results.agentMarketUpgrade);
-        
+
+        const overallSuccess = (!config.upgradeTEEVerifier || results.teeVerifierUpgrade) &&
+            (!config.upgradeVerifier || results.verifierUpgrade) &&
+            (!config.upgradeAgentNFT || results.agentNFTUpgrade) &&
+            (!config.upgradeAgentMarket || results.agentMarketUpgrade);
+
         console.log("Overall upgrade:", overallSuccess ? "✅ Success" : "❌ Failed");
 
         if (!overallSuccess) {
