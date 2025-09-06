@@ -103,10 +103,10 @@ async function performSafetyChecks(
 async function main() {
     // configure the upgrade parameters
     const config: UpgradeConfig = {
-        upgradeTEEVerifier: true,
-        upgradeVerifier: true,
-        upgradeAgentNFT: true,
-        upgradeAgentMarket: true,
+        upgradeTEEVerifier: process.env.UPGRADE_TEE_VERIFIER === "true",
+        upgradeVerifier: process.env.UPGRADE_VERIFIER === "true",
+        upgradeAgentNFT: process.env.UPGRADE_AGENT_NFT === "true",
+        upgradeAgentMarket: process.env.UPGRADE_AGENT_MARKET === "true",
         teeVerifierProxyAddress: process.env.TEE_VERIFIER_PROXY_ADDRESS,
         verifierProxyAddress: process.env.VERIFIER_PROXY_ADDRESS,
         agentNFTProxyAddress: process.env.AGENT_NFT_PROXY_ADDRESS,

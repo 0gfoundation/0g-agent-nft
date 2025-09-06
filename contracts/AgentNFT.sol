@@ -43,6 +43,12 @@ contract AgentNFT is
         uint256 indexed _tokenId
     );
 
+    event AuthorizationRevoked(
+        address indexed _from,
+        address indexed _to,
+        uint256 indexed _tokenId
+    );
+
     event Transferred(
         uint256 _tokenId,
         address indexed _from,
@@ -495,16 +501,23 @@ contract AgentNFT is
     function revokeAuthorization(uint256 tokenId, address user) public virtual {
         AgentNFTStorage storage $ = _getAgentStorage();
         require($.tokens[tokenId].owner == msg.sender, "Not owner");
+        require(user != address(0), "Zero address");
 
         address[] storage authorizedUsers = $.tokens[tokenId].authorizedUsers;
+        bool found = false;
+
         for (uint i = 0; i < authorizedUsers.length; i++) {
             if (authorizedUsers[i] == user) {
                 authorizedUsers[i] = authorizedUsers[
                     authorizedUsers.length - 1
                 ];
                 authorizedUsers.pop();
+                found = true;
                 break;
             }
         }
+
+        require(found, "User not authorized");
+        emit AuthorizationRevoked(msg.sender, user, tokenId);
     }
 }

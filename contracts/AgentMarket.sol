@@ -10,7 +10,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./AgentNFT.sol";
-
+import "./Utils.sol";
 contract AgentMarket is
     Initializable,
     AccessControlUpgradeable,
@@ -64,20 +64,25 @@ contract AgentMarket is
         _grantRole(PAUSER_ROLE, _admin);
     }
 
-    function setAdmin(address newAdmin) external override onlyRole(ADMIN_ROLE) {
+    function setAdmin(
+        address newAdmin
+    ) external override onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newAdmin != address(0), "Invalid admin address");
         address oldAdmin = admin;
-        admin = newAdmin;
-
-        _grantRole(ADMIN_ROLE, newAdmin);
-        _grantRole(PAUSER_ROLE, newAdmin);
 
         if (oldAdmin != newAdmin) {
+            admin = newAdmin;
+
+            _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+            _grantRole(ADMIN_ROLE, newAdmin);
+            _grantRole(PAUSER_ROLE, newAdmin);
+
+            _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
             _revokeRole(ADMIN_ROLE, oldAdmin);
             _revokeRole(PAUSER_ROLE, oldAdmin);
-        }
 
-        emit AdminChanged(oldAdmin, newAdmin);
+            emit AdminChanged(oldAdmin, newAdmin);
+        }
     }
 
     function setFeeRate(
@@ -149,8 +154,8 @@ contract AgentMarket is
             require(buyer == order.receiver, "Receiver mismatch");
         }
         // 4. mark order and offer as used
-        usedOrders[uint256(keccak256(order.nonce))] = true;
-        usedOffers[uint256(keccak256(offer.nonce))] = true;
+        usedOrders[uint256(order.nonce)] = true;
+        usedOffers[uint256(offer.nonce)] = true;
 
         emit OrderFulfilled(
             seller,
@@ -191,10 +196,7 @@ contract AgentMarket is
         require(order.expectedPrice >= 0, "Invalid price");
         // 1.3 verify order nonce is not used
         address seller = _verifyOrderSignature(order);
-        require(
-            !usedOrders[uint256(keccak256(order.nonce))],
-            "Order already used"
-        );
+        require(!usedOrders[uint256(order.nonce)], "Order already used");
         // 1.4 verify NFT owner is seller
         address tokenOwner = AgentNFT(agentNFT).ownerOf(order.tokenId);
         require(tokenOwner == seller, "NFT owner mismatch");
@@ -211,10 +213,7 @@ contract AgentMarket is
         require(offer.tokenId == order.tokenId, "TokenId mismatch");
 
         address buyer = _verifyOfferSignature(offer);
-        require(
-            !usedOffers[uint256(keccak256(offer.nonce))],
-            "Offer already used"
-        );
+        require(!usedOffers[uint256(offer.nonce)], "Offer already used");
 
         if (order.receiver != address(0)) {
             require(buyer == order.receiver, "Receiver mismatch");
@@ -225,46 +224,67 @@ contract AgentMarket is
 
     function _verifyOrderSignature(
         Order calldata order
-    ) internal pure returns (address) {
-        bytes32 orderHashHex = keccak256(
-            abi.encodePacked(
+    ) internal view returns (address) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256(
+                    "Order(uint256 tokenId,uint256 expectedPrice,address currency,uint256 expireTime,bytes32 nonce,address receiver,uint256 chainId,address verifyingContract)"
+                ),
                 order.tokenId,
                 order.expectedPrice,
                 order.currency,
                 order.expireTime,
                 order.nonce,
-                order.receiver
+                order.receiver,
+                block.chainid,
+                address(this)
             )
         );
 
-        string memory message = Strings.toHexString(uint256(orderHashHex), 32);
-        bytes32 ethSignedHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n66", message)
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash)
         );
 
-        address seller = ethSignedHash.recover(order.signature);
-        return seller;
+        return digest.recover(order.signature);
     }
 
     function _verifyOfferSignature(
         Offer calldata offer
-    ) internal pure returns (address) {
-        bytes32 offerHashHex = keccak256(
-            abi.encodePacked(
+    ) internal view returns (address) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256(
+                    "Offer(uint256 tokenId,uint256 offeredPrice,uint256 expireTime,bytes32 nonce,uint256 chainId,address verifyingContract)"
+                ),
                 offer.tokenId,
                 offer.offerPrice,
                 offer.expireTime,
-                offer.nonce
+                offer.nonce,
+                block.chainid,
+                address(this)
             )
         );
 
-        string memory message = Strings.toHexString(uint256(offerHashHex), 32);
-        bytes32 ethSignedHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n66", message)
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash)
         );
 
-        address buyer = ethSignedHash.recover(offer.signature);
-        return buyer;
+        return digest.recover(offer.signature);
+    }
+
+    function _domainSeparatorV4() internal view returns (bytes32) {
+        return
+            keccak256(
+                abi.encode(
+                    keccak256(
+                        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+                    ),
+                    keccak256(bytes("AgentMarket")),
+                    keccak256(bytes(VERSION)),
+                    block.chainid,
+                    address(this)
+                )
+            );
     }
 
     function _handlePayment(

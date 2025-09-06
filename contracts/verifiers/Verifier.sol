@@ -161,7 +161,7 @@ contract Verifier is
         }
         // TODO: add ZKP verification
         else {
-            return true;
+            return false;
         }
     }
 

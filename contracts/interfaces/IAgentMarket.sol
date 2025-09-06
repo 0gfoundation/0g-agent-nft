@@ -9,7 +9,7 @@ struct Order {
     uint256 expectedPrice;
     address currency;
     uint256 expireTime;
-    bytes nonce;
+    bytes32 nonce;
     bytes signature;
     // if receiver is set, the order is a directed order, can only be fulfilled by the specified receiver
     address receiver;
@@ -19,7 +19,7 @@ struct Offer {
     uint256 tokenId;
     uint256 offerPrice;
     uint256 expireTime;
-    bytes nonce;
+    bytes32 nonce;
     bytes signature;
 }
 
