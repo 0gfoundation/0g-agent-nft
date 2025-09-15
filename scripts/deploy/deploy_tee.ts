@@ -24,7 +24,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 
     console.log("📝 Deploying TEEVerifier with Beacon Proxy...");
 
-    const tdxQuote = process.env.TDX_QUOTE || "0x00"; // mock quote
+    const tdxQuote = process.env.TDX_QUOTE || "0x00";
 
     const trustedMeasurements: TrustedMeasurementsStruct = {
         mrtd: process.env.TRUSTED_MRTD || "0x0000000000000000000000000000000000000000000000000000000000000000",

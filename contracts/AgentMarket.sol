@@ -175,6 +175,10 @@ contract AgentMarket is
     }
 
     function withdraw(address account, uint256 amount) external {
+        require(
+            msg.sender == account || msg.sender == admin,
+            "Only the account or admin can withdraw"
+        );
         require(balances[account] >= amount, "Insufficient balance");
         require(account != address(0), "Invalid address");
         require(!paused(), "Contract is paused");

@@ -1,4 +1,3 @@
-// deployments/03_deploy_agentMarket.ts
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { CONTRACTS, deployInBeaconProxy } from "../utils/utils";
@@ -6,9 +5,9 @@ import { CONTRACTS, deployInBeaconProxy } from "../utils/utils";
 const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     const { getNamedAccounts } = hre;
     const { deployer } = await getNamedAccounts();
-    
+
     console.log("🚀 Deploying AgentMarket with account:", deployer);
-    
+
     const existingAgentMarket = await hre.deployments.getOrNull(CONTRACTS.AgentMarket.name);
     if (existingAgentMarket) {
         console.log("✅ AgentMarket already deployed at:", existingAgentMarket.address);
@@ -19,7 +18,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     console.log("📋 Using AgentNFT at:", agentNFTDeployment.address);
 
     console.log("📝 Deploying AgentMarket with Beacon Proxy...");
-    
+
     const initialFeeRate = process.env.ZG_INITIAL_FEE_RATE || "1000";
 
     const AgentMarketFactory = await hre.ethers.getContractFactory("AgentMarket");
@@ -28,11 +27,11 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
         parseInt(initialFeeRate),
         deployer
     ]);
-    
+
     await deployInBeaconProxy(
         hre,
         CONTRACTS.AgentMarket,
-        false,  
+        false,
         [],
         agentMarketInitData
     );

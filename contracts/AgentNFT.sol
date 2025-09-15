@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {AccessControlEnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlEnumerableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "./interfaces/IERC7857.sol";
 import "./interfaces/IERC7857Metadata.sol";
@@ -9,7 +11,9 @@ import "./interfaces/IERC7857DataVerifier.sol";
 import "./Utils.sol";
 
 contract AgentNFT is
-    AccessControlEnumerableUpgradeable,
+    AccessControlUpgradeable,
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable,
     IERC7857,
     IERC7857Metadata
 {
@@ -45,6 +49,7 @@ contract AgentNFT is
         string storageInfo;
         // Core components
         IERC7857DataVerifier verifier;
+        address admin;
     }
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -80,8 +85,9 @@ contract AgentNFT is
     ) public virtual initializer {
         require(verifierAddr != address(0), "Zero address");
 
-        __AccessControlEnumerable_init();
-
+        __AccessControl_init();
+        __ReentrancyGuard_init();
+        __Pausable_init();
         _grantRole(DEFAULT_ADMIN_ROLE, admin_);
         _grantRole(ADMIN_ROLE, admin_);
         _grantRole(PAUSER_ROLE, admin_);
@@ -91,6 +97,28 @@ contract AgentNFT is
         $.symbol = symbol_;
         $.storageInfo = storageInfo_;
         $.verifier = IERC7857DataVerifier(verifierAddr);
+        $.admin = admin_;
+    }
+
+    function setAdmin(
+        address newAdmin
+    ) external override onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newAdmin != address(0), "Invalid admin address");
+        address oldAdmin = _getAgentStorage().admin;
+
+        if (oldAdmin != newAdmin) {
+            _getAgentStorage().admin = newAdmin;
+
+            _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+            _grantRole(ADMIN_ROLE, newAdmin);
+            _grantRole(PAUSER_ROLE, newAdmin);
+
+            _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+            _revokeRole(ADMIN_ROLE, oldAdmin);
+            _revokeRole(PAUSER_ROLE, oldAdmin);
+
+            emit AdminChanged(oldAdmin, newAdmin);
+        }
     }
 
     // Basic getters
@@ -104,6 +132,10 @@ contract AgentNFT is
 
     function verifier() public view virtual returns (IERC7857DataVerifier) {
         return _getAgentStorage().verifier;
+    }
+
+    function admin() public view virtual returns (address) {
+        return _getAgentStorage().admin;
     }
 
     // Admin functions

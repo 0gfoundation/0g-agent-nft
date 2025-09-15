@@ -7,6 +7,7 @@ import "../TeeVerifier.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -20,7 +21,8 @@ contract Verifier is
     BaseVerifier,
     Initializable,
     AccessControlUpgradeable,
-    PausableUpgradeable
+    PausableUpgradeable,
+    ReentrancyGuardUpgradeable
 {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -34,7 +36,11 @@ contract Verifier is
 
     uint256 public maxProofAge;
 
+    address public admin;
+
     string public constant VERSION = "2.0.0";
+
+    event AdminChanged(address indexed oldAdmin, address indexed newAdmin);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -47,6 +53,7 @@ contract Verifier is
     ) external initializer {
         __AccessControl_init();
         __Pausable_init();
+        __ReentrancyGuard_init();
 
         for (uint256 i = 0; i < _attestationConfigs.length; i++) {
             attestationContract[
@@ -60,6 +67,25 @@ contract Verifier is
         _grantRole(PAUSER_ROLE, _admin);
 
         emit AttestationContractUpdated(_attestationConfigs);
+    }
+
+    function setAdmin(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newAdmin != address(0), "Invalid admin address");
+        address oldAdmin = admin;
+
+        if (oldAdmin != newAdmin) {
+            admin = newAdmin;
+
+            _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+            _grantRole(ADMIN_ROLE, newAdmin);
+            _grantRole(PAUSER_ROLE, newAdmin);
+
+            _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+            _revokeRole(ADMIN_ROLE, oldAdmin);
+            _revokeRole(PAUSER_ROLE, oldAdmin);
+
+            emit AdminChanged(oldAdmin, newAdmin);
+        }
     }
 
     function updateAttestationContract(

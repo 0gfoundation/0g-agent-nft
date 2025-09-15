@@ -82,9 +82,22 @@ interface IERC7857 {
     /// @param _assistant The assistant
     event DelegateAccess(address indexed _user, address indexed _assistant);
 
+    /// @notice The event emitted when the admin is changed
+    /// @param _oldAdmin The old admin
+    /// @param _newAdmin The new admin
+    event AdminChanged(address indexed _oldAdmin, address indexed _newAdmin);
+
     /// @notice The verifier interface that this NFT uses
     /// @return The address of the verifier contract
     function verifier() external view returns (IERC7857DataVerifier);
+
+    /// @notice Get the admin of the NFT
+    /// @return The address of the admin
+    function admin() external view returns (address);
+
+    /// @notice Set the admin of the NFT
+    /// @param newAdmin The new admin
+    function setAdmin(address newAdmin) external;
 
     /// @notice Transfer data with ownership
     /// @param _to Address to transfer data to
