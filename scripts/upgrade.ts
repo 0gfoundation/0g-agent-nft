@@ -1,15 +1,145 @@
 import { ethers } from "hardhat";
+import fs from 'fs';
+import path from 'path';
 
 interface UpgradeConfig {
     upgradeTEEVerifier: boolean;
     upgradeVerifier: boolean;
     upgradeAgentNFT: boolean;
     upgradeAgentMarket: boolean;
-    teeVerifierProxyAddress?: string;
-    verifierProxyAddress?: string;
-    agentNFTProxyAddress?: string;
-    agentMarketProxyAddress?: string;
     performSafetyChecks: boolean;
+    network: string;
+}
+
+interface DeploymentData {
+    address: string;
+    args?: any[];
+    transactionHash?: string;
+    abi?: any[];
+    implementation?: string;
+    lastUpgrade?: {
+        timestamp: string;
+        transactionHash: string;
+        previousImplementation?: string;
+        newImplementation: string;
+    };
+}
+
+function getDeploymentsPath(network: string): string {
+    const map: Record<string, string> = {
+        zgTestnet: 'zg_testnet',
+        zgMainnet: 'zg_mainnet',
+    };
+    return process.env[`${map[network].toUpperCase()}_DEPLOYMENTS_PATH`] || `deployments/${network}`;
+}
+
+function readDeployment(network: string, contractName: string): DeploymentData | null {
+    const deploymentsPath = getDeploymentsPath(network);
+    const filePath = path.join(deploymentsPath, `${contractName}.json`);
+
+    if (!fs.existsSync(filePath)) {
+        console.warn(`Warning: Deployment file not found: ${filePath}`);
+        return null;
+    }
+
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(content) as DeploymentData;
+    } catch (error) {
+        console.error(`Error reading ${filePath}:`, (error as Error).message);
+        return null;
+    }
+}
+
+function updateDeploymentFiles(
+    network: string,
+    contractName: string,
+    newImplAddress: string,
+    upgradeTxHash: string,
+    previousImplementation?: string
+): void {
+    const deploymentsPath = getDeploymentsPath(network);
+
+    // 1. 更新 Implementation 文件 (主要更新)
+    const implFilePath = path.join(deploymentsPath, `${contractName}Impl.json`);
+    updateImplementationFile(implFilePath, contractName, newImplAddress, upgradeTxHash, previousImplementation);
+
+    // 2. 更新主合约文件中的 implementation 字段 (如果存在)
+    const mainFilePath = path.join(deploymentsPath, `${contractName}.json`);
+    updateMainContractFile(mainFilePath, contractName, newImplAddress, upgradeTxHash, previousImplementation);
+}
+
+function updateImplementationFile(
+    filePath: string,
+    contractName: string,
+    newImplAddress: string,
+    upgradeTxHash: string,
+    previousImplementation?: string
+): void {
+    try {
+        let deployment: DeploymentData = {
+            address: newImplAddress,
+            transactionHash: upgradeTxHash
+        };
+
+        // 如果文件已存在，读取现有数据
+        if (fs.existsSync(filePath)) {
+            const existingData = JSON.parse(fs.readFileSync(filePath, 'utf8')) as DeploymentData;
+            deployment = { ...existingData, ...deployment };
+        }
+
+        // 添加升级历史
+        deployment.lastUpgrade = {
+            timestamp: new Date().toISOString(),
+            transactionHash: upgradeTxHash,
+            previousImplementation: previousImplementation,
+            newImplementation: newImplAddress
+        };
+
+        // 确保目录存在
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+        // 写入文件
+        fs.writeFileSync(filePath, JSON.stringify(deployment, null, 2));
+        console.log(`✅ Updated implementation file: ${filePath}`);
+        console.log(`   Previous implementation: ${previousImplementation || 'N/A'}`);
+        console.log(`   New implementation: ${newImplAddress}`);
+    } catch (error) {
+        console.error(`❌ Error updating implementation file ${filePath}:`, error);
+    }
+}
+
+function updateMainContractFile(
+    filePath: string,
+    contractName: string,
+    newImplAddress: string,
+    upgradeTxHash: string,
+    previousImplementation?: string
+): void {
+    if (fs.existsSync(filePath)) {
+        try {
+            const deployment = JSON.parse(fs.readFileSync(filePath, 'utf8')) as DeploymentData;
+
+            // 更新主合约文件中的 implementation 字段
+            deployment.implementation = newImplAddress;
+            deployment.lastUpgrade = {
+                timestamp: new Date().toISOString(),
+                transactionHash: upgradeTxHash,
+                previousImplementation: previousImplementation,
+                newImplementation: newImplAddress
+            };
+
+            fs.writeFileSync(filePath, JSON.stringify(deployment, null, 2));
+            console.log(`✅ Updated main contract file: ${filePath}`);
+        } catch (error) {
+            console.error(`❌ Error updating main contract file ${filePath}:`, error);
+        }
+    }
+}
+
+function getContractAddress(network: string, contractName: string): string | null {
+    const deployment = readDeployment(network, contractName);
+    return deployment ? deployment.address : null;
 }
 
 async function getBeaconAddress(beaconProxyAddress: string): Promise<string> {
@@ -22,8 +152,9 @@ async function getBeaconAddress(beaconProxyAddress: string): Promise<string> {
 async function upgradeContract(
     contractName: string,
     proxyAddress: string,
-    newImplementationAddress: string
-): Promise<boolean> {
+    newImplementationAddress: string,
+    network: string
+): Promise<{ success: boolean; txHash?: string }> {
     try {
         console.log(`\n=== Upgrading ${contractName} ===`);
 
@@ -34,29 +165,40 @@ async function upgradeContract(
         // 2. get the beacon contract instance
         const beacon = await ethers.getContractAt("UpgradeableBeacon", beaconAddress);
 
-        // 3. verify the permission
+        // 3. get current implementation address before upgrade
+        const currentImplementation = await beacon.implementation();
+        console.log(`Current implementation:`, currentImplementation);
+
+        // 4. verify the permission
         const [deployer] = await ethers.getSigners();
         const owner = await beacon.owner();
         if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
             throw new Error(`Not authorized to upgrade ${contractName}. Owner: ${owner}, Deployer: ${deployer.address}`);
         }
 
-        // 4. execute the upgrade
+        // 5. execute the upgrade
         console.log(`Upgrading ${contractName} to:`, newImplementationAddress);
         const upgradeTx = await beacon.upgradeTo(newImplementationAddress);
-        await upgradeTx.wait();
+        const receipt = await upgradeTx.wait();
+        const txHash = receipt?.hash || upgradeTx.hash;
 
-        // 5. verify the upgrade
-        const currentImpl = await beacon.implementation();
-        const success = currentImpl.toLowerCase() === newImplementationAddress.toLowerCase();
+        // 6. verify the upgrade
+        const newCurrentImpl = await beacon.implementation();
+        const success = newCurrentImpl.toLowerCase() === newImplementationAddress.toLowerCase();
 
         console.log(`${contractName} upgrade ${success ? 'successful' : 'failed'}`);
-        console.log(`Current implementation:`, currentImpl);
+        console.log(`New implementation:`, newCurrentImpl);
+        console.log(`Transaction hash:`, txHash);
 
-        return success;
+        // 7. update deployment file if upgrade successful
+        if (success) {
+            updateDeploymentFiles(network, contractName, newImplementationAddress, txHash, currentImplementation);
+        }
+
+        return { success, txHash };
     } catch (error) {
         console.error(`Error upgrading ${contractName}:`, error);
-        return false;
+        return { success: false };
     }
 }
 
@@ -101,21 +243,53 @@ async function performSafetyChecks(
 }
 
 async function main() {
+    // Parse network from command line arguments or hardhat config
+    let network: string | undefined;
+
+    // Method 1: Check if running through hardhat with --network flag
+    if (process.env.HARDHAT_NETWORK) {
+        network = process.env.HARDHAT_NETWORK;
+    }
+    // Method 2: Check command line arguments (for pnpm/npm scripts)
+    else if (process.argv[2]) {
+        network = process.argv[2];
+    }
+    // Method 3: Check for --network flag in arguments
+    else {
+        const networkIndex = process.argv.findIndex(arg => arg === '--network');
+        if (networkIndex !== -1 && process.argv[networkIndex + 1]) {
+            network = process.argv[networkIndex + 1];
+        }
+    }
+
+    if (!network) {
+        console.error('Usage Options:');
+        console.error('1. npx hardhat run scripts/upgrade.ts --network <network>');
+        console.error('2. pnpm run upgrade <network>');
+        console.error('Example: npx hardhat run scripts/upgrade.ts --network zgTestnet');
+        console.error('Example: pnpm run upgrade zgTestnet');
+        process.exit(1);
+    }
+
     // configure the upgrade parameters
     const config: UpgradeConfig = {
         upgradeTEEVerifier: process.env.UPGRADE_TEE_VERIFIER === "true",
         upgradeVerifier: process.env.UPGRADE_VERIFIER === "true",
         upgradeAgentNFT: process.env.UPGRADE_AGENT_NFT === "true",
         upgradeAgentMarket: process.env.UPGRADE_AGENT_MARKET === "true",
-        teeVerifierProxyAddress: process.env.TEE_VERIFIER_PROXY_ADDRESS,
-        verifierProxyAddress: process.env.VERIFIER_PROXY_ADDRESS,
-        agentNFTProxyAddress: process.env.AGENT_NFT_PROXY_ADDRESS,
-        agentMarketProxyAddress: process.env.AGENT_MARKET_PROXY_ADDRESS,
-        performSafetyChecks: true
+        performSafetyChecks: true,
+        network: network
     };
 
     console.log("=== Smart Contract Upgrade Process ===");
-    console.log("Configuration:", config);
+    console.log(`Network: ${network}`);
+    console.log(`Deployments path: ${getDeploymentsPath(network)}`);
+    console.log("Configuration:", {
+        upgradeTEEVerifier: config.upgradeTEEVerifier,
+        upgradeVerifier: config.upgradeVerifier,
+        upgradeAgentNFT: config.upgradeAgentNFT,
+        upgradeAgentMarket: config.upgradeAgentMarket
+    });
 
     const results = {
         teeVerifierUpgrade: false,
@@ -127,10 +301,12 @@ async function main() {
     try {
         // 1. upgrade TEEVerifier (first, as it's a dependency)
         if (config.upgradeTEEVerifier) {
-            if (!config.teeVerifierProxyAddress) {
-                console.error("❌ TEEVerifier proxy address not provided");
+            const teeVerifierProxyAddress = getContractAddress(config.network, 'TEEVerifier');
+            if (!teeVerifierProxyAddress) {
+                console.error("❌ TEEVerifier proxy address not found in deployments");
                 return;
             }
+            console.log(`📍 TEEVerifier proxy address: ${teeVerifierProxyAddress}`);
 
             console.log("\n📋 Deploying new TEEVerifier implementation...");
 
@@ -144,7 +320,7 @@ async function main() {
             if (config.performSafetyChecks) {
                 const safetyCheck = await performSafetyChecks(
                     "TEEVerifier",
-                    config.teeVerifierProxyAddress,
+                    teeVerifierProxyAddress,
                     teeVerifierImplAddress
                 );
                 if (!safetyCheck) {
@@ -154,19 +330,23 @@ async function main() {
             }
 
             // execute the upgrade
-            results.teeVerifierUpgrade = await upgradeContract(
+            const upgradeResult = await upgradeContract(
                 "TEEVerifier",
-                config.teeVerifierProxyAddress,
-                teeVerifierImplAddress
+                teeVerifierProxyAddress,
+                teeVerifierImplAddress,
+                config.network
             );
+            results.teeVerifierUpgrade = upgradeResult.success;
         }
 
         // 2. upgrade Verifier
         if (config.upgradeVerifier) {
-            if (!config.verifierProxyAddress) {
-                console.error("❌ Verifier proxy address not provided");
+            const verifierProxyAddress = getContractAddress(config.network, 'Verifier');
+            if (!verifierProxyAddress) {
+                console.error("❌ Verifier proxy address not found in deployments");
                 return;
             }
+            console.log(`📍 Verifier proxy address: ${verifierProxyAddress}`);
 
             console.log("\n📋 Deploying new Verifier implementation...");
             const VerifierFactory = await ethers.getContractFactory("Verifier");
@@ -179,7 +359,7 @@ async function main() {
             if (config.performSafetyChecks) {
                 const safetyCheck = await performSafetyChecks(
                     "Verifier",
-                    config.verifierProxyAddress,
+                    verifierProxyAddress,
                     verifierImplAddress
                 );
                 if (!safetyCheck) {
@@ -189,19 +369,23 @@ async function main() {
             }
 
             // execute the upgrade
-            results.verifierUpgrade = await upgradeContract(
+            const upgradeResult = await upgradeContract(
                 "Verifier",
-                config.verifierProxyAddress,
-                verifierImplAddress
+                verifierProxyAddress,
+                verifierImplAddress,
+                config.network
             );
+            results.verifierUpgrade = upgradeResult.success;
         }
 
         // 3. upgrade AgentNFT
         if (config.upgradeAgentNFT) {
-            if (!config.agentNFTProxyAddress) {
-                console.error("❌ AgentNFT proxy address not provided");
+            const agentNFTProxyAddress = getContractAddress(config.network, 'AgentNFT');
+            if (!agentNFTProxyAddress) {
+                console.error("❌ AgentNFT proxy address not found in deployments");
                 return;
             }
+            console.log(`📍 AgentNFT proxy address: ${agentNFTProxyAddress}`);
 
             console.log("\n📋 Deploying new AgentNFT implementation...");
             const AgentNFTFactory = await ethers.getContractFactory("AgentNFT");
@@ -214,7 +398,7 @@ async function main() {
             if (config.performSafetyChecks) {
                 const safetyCheck = await performSafetyChecks(
                     "AgentNFT",
-                    config.agentNFTProxyAddress,
+                    agentNFTProxyAddress,
                     agentNFTImplAddress
                 );
                 if (!safetyCheck) {
@@ -224,19 +408,23 @@ async function main() {
             }
 
             // execute the upgrade
-            results.agentNFTUpgrade = await upgradeContract(
+            const upgradeResult = await upgradeContract(
                 "AgentNFT",
-                config.agentNFTProxyAddress,
-                agentNFTImplAddress
+                agentNFTProxyAddress,
+                agentNFTImplAddress,
+                config.network
             );
+            results.agentNFTUpgrade = upgradeResult.success;
         }
 
         // 4. upgrade AgentMarket
         if (config.upgradeAgentMarket) {
-            if (!config.agentMarketProxyAddress) {
-                console.error("❌ AgentMarket proxy address not provided");
+            const agentMarketProxyAddress = getContractAddress(config.network, 'AgentMarket');
+            if (!agentMarketProxyAddress) {
+                console.error("❌ AgentMarket proxy address not found in deployments");
                 return;
             }
+            console.log(`📍 AgentMarket proxy address: ${agentMarketProxyAddress}`);
 
             console.log("\n📋 Deploying new AgentMarket implementation...");
             const AgentMarketFactory = await ethers.getContractFactory("AgentMarket");
@@ -249,7 +437,7 @@ async function main() {
             if (config.performSafetyChecks) {
                 const safetyCheck = await performSafetyChecks(
                     "AgentMarket",
-                    config.agentMarketProxyAddress,
+                    agentMarketProxyAddress,
                     agentMarketImplAddress
                 );
                 if (!safetyCheck) {
@@ -259,51 +447,65 @@ async function main() {
             }
 
             // execute the upgrade
-            results.agentMarketUpgrade = await upgradeContract(
+            const upgradeResult = await upgradeContract(
                 "AgentMarket",
-                config.agentMarketProxyAddress,
-                agentMarketImplAddress
+                agentMarketProxyAddress,
+                agentMarketImplAddress,
+                config.network
             );
+            results.agentMarketUpgrade = upgradeResult.success;
         }
 
         // 5. final verification
         console.log("\n=== Final Verification ===");
 
-        if (config.upgradeTEEVerifier && config.teeVerifierProxyAddress) {
+        if (config.upgradeTEEVerifier) {
             try {
-                const teeVerifier = await ethers.getContractAt("TEEVerifier", config.teeVerifierProxyAddress);
-                const version = await teeVerifier.VERSION();
-                console.log("✅ TEEVerifier version after upgrade:", version);
+                const teeVerifierProxyAddress = getContractAddress(config.network, 'TEEVerifier');
+                if (teeVerifierProxyAddress) {
+                    const teeVerifier = await ethers.getContractAt("TEEVerifier", teeVerifierProxyAddress);
+                    const version = await teeVerifier.VERSION();
+                    console.log("✅ TEEVerifier version after upgrade:", version);
+                }
             } catch (error) {
                 console.warn("⚠️ Could not verify TEEVerifier after upgrade:", error);
             }
         }
 
-        if (config.upgradeVerifier && config.verifierProxyAddress) {
+        if (config.upgradeVerifier) {
             try {
-                const verifier = await ethers.getContractAt("Verifier", config.verifierProxyAddress);
-                const version = await verifier.VERSION();
-                console.log("✅ Verifier version after upgrade:", version);
+                const verifierProxyAddress = getContractAddress(config.network, 'Verifier');
+                if (verifierProxyAddress) {
+                    const verifier = await ethers.getContractAt("Verifier", verifierProxyAddress);
+                    const version = await verifier.VERSION();
+                    console.log("✅ Verifier version after upgrade:", version);
+                }
             } catch (error) {
                 console.warn("⚠️ Could not verify Verifier after upgrade:", error);
             }
         }
 
-        if (config.upgradeAgentNFT && config.agentNFTProxyAddress) {
+        if (config.upgradeAgentNFT) {
             try {
-                const agentNFT = await ethers.getContractAt("AgentNFT", config.agentNFTProxyAddress);
-                const version = await agentNFT.VERSION();
-                console.log("✅ AgentNFT version after upgrade:", version);
+                const agentNFTProxyAddress = getContractAddress(config.network, 'AgentNFT');
+                if (agentNFTProxyAddress) {
+                    const agentNFT = await ethers.getContractAt("AgentNFT", agentNFTProxyAddress);
+                    const version = await agentNFT.VERSION();
+                    console.log("✅ AgentNFT version after upgrade:", version);
+                }
             } catch (error) {
                 console.warn("⚠️ Could not verify AgentNFT after upgrade:", error);
             }
         }
 
-        if (config.upgradeAgentMarket && config.agentMarketProxyAddress) {
+        if (config.upgradeAgentMarket) {
             try {
-                const agentMarket = await ethers.getContractAt("AgentMarket", config.agentMarketProxyAddress);
-                const version = await agentMarket.VERSION();
-                console.log("✅ AgentMarket version after upgrade:", version);
+                const agentMarketProxyAddress = getContractAddress(config.network, 'AgentMarket');
+                if (agentMarketProxyAddress) {
+                    const agentMarket = await ethers.getContractAt("AgentMarket", agentMarketProxyAddress);
+                    const version = await agentMarket.VERSION();
+                    console.log("✅ AgentMarket version after upgrade:", version);
+                }
             } catch (error) {
                 console.warn("⚠️ Could not verify AgentMarket after upgrade:", error);
             }
