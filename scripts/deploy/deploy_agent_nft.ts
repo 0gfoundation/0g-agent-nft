@@ -20,7 +20,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     console.log("📝 Deploying AgentNFT with Beacon Proxy...");
 
     const nftName = process.env.ZG_iNFT_NAME || "0G Agent NFT";
-    const nftSymbol = process.env.ZG_iNFT_SYMBOL || "A0GIA";
+    const nftSymbol = process.env.ZG_iNFT_SYMBOL || "0GI";
     const chainURL = process.env.ZG_RPC_URL || "https://evmrpc-testnet.0g.ai";
     const indexerURL = process.env.ZG_INDEXER_URL || "https://indexer-storage-testnet-turbo.0g.ai";
     const storageInfo = JSON.stringify({

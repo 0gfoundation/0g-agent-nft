@@ -20,12 +20,13 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     console.log("📝 Deploying AgentMarket with Beacon Proxy...");
 
     const initialFeeRate = process.env.ZG_INITIAL_FEE_RATE || "1000";
-
+    const initialMintFee = process.env.ZG_INITIAL_MINT_FEE || "100000000000000000";
     const AgentMarketFactory = await hre.ethers.getContractFactory("AgentMarket");
     const agentMarketInitData = AgentMarketFactory.interface.encodeFunctionData("initialize", [
         agentNFTDeployment.address,
-        parseInt(initialFeeRate),
-        deployer
+        BigInt(initialFeeRate),
+        deployer,
+        BigInt(initialMintFee)
     ]);
 
     await deployInBeaconProxy(

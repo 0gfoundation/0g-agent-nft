@@ -27,8 +27,10 @@ contract AgentMarket is
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
     address public override admin;
-    uint256 private _feeRate;
+    uint256 private feeRate;
     uint256 public constant MAX_FEE_RATE = 1000;
+    // 0.1 0G: 100000000000000000
+    uint256 private mintFee;
 
     address public agentNFT;
 
@@ -47,7 +49,8 @@ contract AgentMarket is
     function initialize(
         address _agentNFT,
         uint256 _initialFeeRate,
-        address _admin
+        address _admin,
+        uint256 _initialMintFee
     ) external initializer {
         __AccessControl_init();
         __Pausable_init();
@@ -59,7 +62,8 @@ contract AgentMarket is
 
         admin = _admin;
         agentNFT = _agentNFT;
-        _feeRate = _initialFeeRate;
+        feeRate = _initialFeeRate;
+        mintFee = _initialMintFee;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(ADMIN_ROLE, _admin);
@@ -91,8 +95,8 @@ contract AgentMarket is
         uint256 newFeeRate
     ) external override onlyRole(ADMIN_ROLE) {
         require(newFeeRate <= MAX_FEE_RATE, "Fee rate too high");
-        uint256 oldFeeRate = _feeRate;
-        _feeRate = newFeeRate;
+        uint256 oldFeeRate = feeRate;
+        feeRate = newFeeRate;
         emit FeeRateUpdated(oldFeeRate, newFeeRate);
     }
 
@@ -108,7 +112,7 @@ contract AgentMarket is
         require(amount > 0, "No fees to withdraw");
 
         if (currency == address(0)) {
-            // withdraw A0GI
+            // withdraw 0G
             _safeTransferNative(admin, amount);
         } else {
             // withdraw ERC20 - only update balance after successful transfer
@@ -299,7 +303,7 @@ contract AgentMarket is
         address seller
     ) internal {
         uint256 totalAmount = offerPrice;
-        uint256 fee = (totalAmount * _feeRate) / 10000;
+        uint256 fee = (totalAmount * feeRate) / 10000;
         uint256 sellerAmount = totalAmount - fee;
 
         IERC20 token = IERC20(currency);
@@ -316,7 +320,7 @@ contract AgentMarket is
     }
 
     function getFeeRate() external view override returns (uint256) {
-        return _feeRate;
+        return feeRate;
     }
 
     function getFeeBalance(
@@ -328,9 +332,29 @@ contract AgentMarket is
     function _safeTransferNative(address to, uint256 amount) internal {
         require(to != address(0), "Invalid recipient");
         require(amount > 0, "Invalid amount");
-        
+
         (bool success, ) = payable(to).call{value: amount}("");
         require(success, "Native token transfer failed");
+    }
+
+    // for paid mint
+    function setMintFee(uint256 newMintFee) external onlyRole(ADMIN_ROLE) {
+        mintFee = newMintFee;
+    }
+
+    function getMintFee() external view returns (uint256) {
+        return mintFee;
+    }
+
+    function paidMint(
+        IntelligentData[] calldata iDatas,
+        address to
+    ) external payable {
+        require(balances[to] >= mintFee, "Insufficient balance for mint fee");
+        require(to != address(0), "Invalid recipient");
+        require(msg.sender == admin, "Only admin can mint");
+        balances[to] -= mintFee;
+        AgentNFT(agentNFT).mint(iDatas, to);
     }
 
     function pause() external override onlyRole(PAUSER_ROLE) {
