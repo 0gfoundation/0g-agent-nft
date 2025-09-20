@@ -337,9 +337,11 @@ contract AgentMarket is
         require(success, "Native token transfer failed");
     }
 
+    event MintFeeUpdated(uint256 mintFee);
     // for paid mint
     function setMintFee(uint256 newMintFee) external onlyRole(ADMIN_ROLE) {
         mintFee = newMintFee;
+        emit MintFeeUpdated(mintFee);
     }
 
     function getMintFee() external view returns (uint256) {
@@ -349,10 +351,10 @@ contract AgentMarket is
     function paidMint(
         IntelligentData[] calldata iDatas,
         address to
-    ) external payable {
+    ) external onlyRole(ADMIN_ROLE) {
         require(balances[to] >= mintFee, "Insufficient balance for mint fee");
         require(to != address(0), "Invalid recipient");
-        require(msg.sender == admin, "Only admin can mint");
+        require(!paused(), "Contract is paused");
         balances[to] -= mintFee;
         AgentNFT(agentNFT).mint(iDatas, to);
     }
