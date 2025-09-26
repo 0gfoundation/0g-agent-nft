@@ -9,6 +9,8 @@ const ZG_TESTNET_NETWORK_NAME = process.env.ZG_TESTNET_NETWORK_NAME;
 const ZG_MAINNET_NETWORK_NAME = process.env.ZG_MAINNET_NETWORK_NAME;
 const ZG_TESTNET_RPC_URL = process.env.ZG_TESTNET_RPC_URL;
 const ZG_MAINNET_RPC_URL = process.env.ZG_MAINNET_RPC_URL;
+const ZG_TESTNET_CHAIN_ID = process.env.ZG_TESTNET_CHAIN_ID;
+const ZG_MAINNET_CHAIN_ID = process.env.ZG_MAINNET_CHAIN_ID;
 const ZG_TESTNET_PRIVATE_KEY = process.env.ZG_TESTNET_PRIVATE_KEY;
 const ZG_MAINNET_PRIVATE_KEY = process.env.ZG_MAINNET_PRIVATE_KEY;
 const ZG_AGENT_NFT_CREATOR_PRIVATE_KEY = process.env.ZG_AGENT_NFT_CREATOR_PRIVATE_KEY;
@@ -87,7 +89,7 @@ const config: HardhatUserConfig = {
     customChains: [
       {
         network: ZG_TESTNET_NETWORK_NAME || "zgTestnet",
-        chainId: 16601,
+        chainId: Number(ZG_TESTNET_CHAIN_ID) || 16602,
         urls: {
           apiURL: ZG_TESTNET_ETHERSCAN_API_URL || "",
           browserURL: ZG_TESTNET_ETHERSCAN_BROWSER_URL || "",
@@ -95,7 +97,7 @@ const config: HardhatUserConfig = {
       },
       {
         network: ZG_MAINNET_NETWORK_NAME || "zgMainnet",
-        chainId: 16661,
+        chainId: Number(ZG_MAINNET_CHAIN_ID) || 16661,
         urls: {
           apiURL: ZG_MAINNET_ETHERSCAN_API_URL || "",
           browserURL: ZG_MAINNET_ETHERSCAN_BROWSER_URL || "",
