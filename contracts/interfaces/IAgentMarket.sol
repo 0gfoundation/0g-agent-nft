@@ -31,11 +31,7 @@ interface IAgentMarket {
         uint256 price,
         address currency
     );
-    event FeesWithdrawn(
-        address indexed admin,
-        address currency,
-        uint256 amount
-    );
+    event FeesWithdrawn(address indexed admin, address currency, uint256 amount);
     event AdminChanged(address indexed oldAdmin, address indexed newAdmin);
     event FeeRateUpdated(uint256 oldFeeRate, uint256 newFeeRate);
     event ContractPaused(address indexed admin);
@@ -44,9 +40,13 @@ interface IAgentMarket {
     event Withdraw(address indexed account, uint256 balance);
 
     function admin() external view returns (address);
+
     function setAdmin(address newAdmin) external;
+
     function withdrawFees(address currency) external;
+
     function getFeeBalance(address currency) external view returns (uint256);
+
     function setFeeRate(uint256 newFeeRate) external;
 
     function fulfillOrder(
@@ -58,6 +58,8 @@ interface IAgentMarket {
     function getFeeRate() external view returns (uint256);
 
     function pause() external;
+
     function unpause() external;
+
     function isPaused() external view returns (bool);
 }

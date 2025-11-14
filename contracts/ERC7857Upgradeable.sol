@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {ERC165Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+
+import {IERC7857} from "./interfaces/IERC7857.sol";
+import {IntelligentData} from "./interfaces/IERC7857Metadata.sol";
+import {IERC7857DataVerifier, TransferValidityProof, TransferValidityProofOutput} from "./interfaces/IERC7857DataVerifier.sol";
+
+import "./Utils.sol";
+
+contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
+    /// @custom:storage-location erc7857:0g.storage.ERC7857
+    struct ERC7857Storage {
+        mapping(uint tokenId => IntelligentData[]) iDatas;
+        mapping(uint tokenId => EnumerableSet.AddressSet) authorizedUsers;
+        mapping(address owner => address) accessAssistants;
+        IERC7857DataVerifier verifier;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("0g.storage.ERC7857")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ERC7857StorageLocation =
+        0xa2b40c657abdbf180a6038c081d3a0af6206dcea36f4558f991bf8c787ef3c00;
+
+    function _getERC7857Storage() private pure returns (ERC7857Storage storage $) {
+        assembly {
+            $.slot := ERC7857StorageLocation
+        }
+    }
+
+    uint public constant MAX_AUTHORIZED_USERS = 100;
+
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @dev Initializes the contract by setting a `name` and a `symbol` to the token collection.
+     */
+    function __ERC7857_init(string memory name_, string memory symbol_, address verifier_) internal onlyInitializing {
+        __ERC721_init(name_, symbol_);
+        __ERC7857_init_unchained(verifier_);
+    }
+
+    function __ERC7857_init_unchained(address verifier_) internal onlyInitializing {
+        _setVerifier(verifier_);
+    }
+
+    function _setVerifier(address verifier_) internal {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        $.verifier = IERC7857DataVerifier(verifier_);
+    }
+
+    /**
+     * @dev See {IERC165-supportsInterface}.
+     */
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view virtual override(ERC721Upgradeable, IERC165) returns (bool) {
+        return interfaceId == type(IERC7857).interfaceId || super.supportsInterface(interfaceId);
+    }
+
+    function _authorizeUsage(uint256 tokenId, address to) internal {
+        ERC7857Storage storage $ = _getERC7857Storage();
+
+        EnumerableSet.AddressSet storage authorizedUsers = $.authorizedUsers[tokenId];
+
+        if (authorizedUsers.length() > MAX_AUTHORIZED_USERS) {
+            revert ERC7857TooManyAuthorizedUsers();
+        }
+
+        if (authorizedUsers.contains(to)) {
+            revert ERC7857AlreadyAuthorized();
+        }
+
+        authorizedUsers.add(to);
+
+        emit Authorization(msg.sender, to, tokenId);
+    }
+
+    function authorizeUsage(uint256 tokenId, address to) public virtual {
+        if (to == address(0)) {
+            revert ERC7857InvalidAuthorizedUser(address(0));
+        }
+
+        if (_ownerOf(tokenId) != msg.sender) {
+            revert ERC721IncorrectOwner(msg.sender, tokenId, _ownerOf(tokenId));
+        }
+
+        _authorizeUsage(tokenId, to);
+    }
+
+    function authorizedUsersOf(uint256 tokenId) public view virtual returns (address[] memory) {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        if (_ownerOf(tokenId) == address(0)) {
+            revert ERC721NonexistentToken(tokenId);
+        }
+        return $.authorizedUsers[tokenId].values();
+    }
+
+    function delegateAccess(address assistant) public virtual {
+        if (assistant == address(0)) {
+            revert ERC7857InvalidAssistant(assistant);
+        }
+
+        ERC7857Storage storage $ = _getERC7857Storage();
+        $.accessAssistants[msg.sender] = assistant;
+
+        emit DelegateAccess(msg.sender, assistant);
+    }
+
+    function getDelegateAccess(address user) public view virtual returns (address) {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        return $.accessAssistants[user];
+    }
+
+    function _proofCheck(
+        address from,
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] calldata proofs
+    ) internal returns (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        if (to == address(0)) {
+            revert ERC721InvalidReceiver(to);
+        }
+        if (_ownerOf(tokenId) != from) {
+            revert ERC721InvalidSender(from);
+        }
+        if (proofs.length == 0) {
+            revert ERC7857EmptyProof();
+        }
+
+        TransferValidityProofOutput[] memory proofOutput = $.verifier.verifyTransferValidity(proofs);
+
+        if (proofOutput.length != $.iDatas[tokenId].length) {
+            revert ERC7857ProofCountMismatch();
+        }
+
+        sealedKeys = new bytes[](proofOutput.length);
+        newDatas = new IntelligentData[](proofOutput.length);
+
+        for (uint i = 0; i < proofOutput.length; i++) {
+            // require the initial data hash is the same as the old data hash
+            if (proofOutput[i].oldDataHash != $.iDatas[tokenId][i].dataHash) {
+                revert ERC7857DataHashMismatch();
+            }
+
+            // only the receiver itself or the access assistant can sign the access proof
+            if (proofOutput[i].accessAssistant != $.accessAssistants[to] && proofOutput[i].accessAssistant != to) {
+                revert ERC7857AccessAssistantMismatch();
+            }
+
+            bytes memory wantedKey = proofOutput[i].wantedKey;
+            bytes memory encryptedPubKey = proofOutput[i].encryptedPubKey;
+            if (wantedKey.length == 0) {
+                // if the wanted key is empty, the default wanted receiver is receiver itself
+                address defaultWantedReceiver = Utils.pubKeyToAddress(encryptedPubKey);
+                if (defaultWantedReceiver != to) {
+                    revert ERC7857WantedReceiverMismatch();
+                }
+            } else {
+                // if the wanted key is not empty, the data is private
+                if (!Utils.bytesEqual(encryptedPubKey, wantedKey)) {
+                    revert ERC7857EncryptedPubKeyMismatch();
+                }
+            }
+
+            sealedKeys[i] = proofOutput[i].sealedKey;
+            newDatas[i] = IntelligentData({
+                dataDescription: $.iDatas[tokenId][i].dataDescription,
+                dataHash: proofOutput[i].newDataHash
+            });
+        }
+    }
+
+    function _clearAuthorized(uint tokenId) internal {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        address[] memory values = $.authorizedUsers[tokenId].values();
+        for (uint i = 0; i < values.length; ++i) {
+            $.authorizedUsers[tokenId].remove(values[i]);
+        }
+    }
+
+    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
+        address from = super._update(to, tokenId, auth);
+        // clear authorized users
+        _clearAuthorized(tokenId);
+        return from;
+    }
+
+    function _updateData(uint256 tokenId, IntelligentData[] memory newDatas) internal virtual {
+        ERC7857Storage storage $ = _getERC7857Storage();
+
+        IntelligentData[] memory oldDatas = new IntelligentData[]($.iDatas[tokenId].length);
+        for (uint i = 0; i < $.iDatas[tokenId].length; i++) {
+            oldDatas[i] = $.iDatas[tokenId][i];
+        }
+
+        delete $.iDatas[tokenId];
+        for (uint i = 0; i < newDatas.length; i++) {
+            $.iDatas[tokenId].push(newDatas[i]);
+        }
+
+        emit Updated(tokenId, oldDatas, newDatas);
+    }
+
+    function _transfer(address from, address to, uint256 tokenId, TransferValidityProof[] calldata proofs) internal {
+        (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) = _proofCheck(from, to, tokenId, proofs);
+
+        _transfer(from, to, tokenId);
+
+        _updateData(tokenId, newDatas);
+
+        emit PublishedSealedKey(to, tokenId, sealedKeys);
+    }
+
+    function iTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] calldata proofs
+    ) public virtual {
+        // owner and authority will be checked in _update()
+        _transfer(from, to, tokenId, proofs);
+    }
+
+    function intelligentDatasOf(uint256 tokenId) public view virtual returns (IntelligentData[] memory) {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        if (_ownerOf(tokenId) == address(0)) {
+            revert ERC721NonexistentToken(tokenId);
+        }
+        return $.iDatas[tokenId];
+    }
+
+    function revokeAuthorization(uint256 tokenId, address user) public virtual {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        if (_ownerOf(tokenId) != msg.sender) {
+            revert ERC721InvalidSender(msg.sender);
+        }
+        if (user == address(0)) {
+            revert ERC7857InvalidAuthorizedUser(user);
+        }
+
+        if (!$.authorizedUsers[tokenId].remove(user)) {
+            revert ERC7857NotAuthorized();
+        }
+
+        emit AuthorizationRevoked(msg.sender, user, tokenId);
+    }
+
+    function verifier() public view virtual returns (IERC7857DataVerifier) {
+        ERC7857Storage storage $ = _getERC7857Storage();
+        return $.verifier;
+    }
+}

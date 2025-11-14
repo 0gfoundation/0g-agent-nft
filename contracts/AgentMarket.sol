@@ -12,6 +12,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./AgentNFT.sol";
 import "./Utils.sol";
+
 contract AgentMarket is
     Initializable,
     AccessControlUpgradeable,
@@ -74,9 +75,7 @@ contract AgentMarket is
         _grantRole(PAUSER_ROLE, _admin);
     }
 
-    function setAdmin(
-        address newAdmin
-    ) external override onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setAdmin(address newAdmin) external override onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newAdmin != address(0), "Invalid admin address");
         address oldAdmin = admin;
 
@@ -95,9 +94,7 @@ contract AgentMarket is
         }
     }
 
-    function setFeeRate(
-        uint256 newFeeRate
-    ) external override onlyRole(ADMIN_ROLE) {
+    function setFeeRate(uint256 newFeeRate) external override onlyRole(ADMIN_ROLE) {
         require(newFeeRate <= MAX_FEE_RATE, "Fee rate too high");
         uint256 oldFeeRate = feeRate;
         feeRate = newFeeRate;
@@ -105,6 +102,7 @@ contract AgentMarket is
     }
 
     event AgentNFTUpdated(address oldAgentNFT, address newAgentNFT);
+
     function setAgentNFT(address _agentNFT) external onlyRole(ADMIN_ROLE) {
         require(_agentNFT != address(0), "Invalid AgentNFT address");
         address oldAgentNFT = agentNFT;
@@ -112,9 +110,7 @@ contract AgentMarket is
         emit AgentNFTUpdated(oldAgentNFT, _agentNFT);
     }
 
-    function withdrawFees(
-        address currency
-    ) external override onlyRole(ADMIN_ROLE) {
+    function withdrawFees(address currency) external override onlyRole(ADMIN_ROLE) {
         uint256 amount = feeBalances[currency];
         require(amount > 0, "No fees to withdraw");
 
@@ -147,12 +143,7 @@ contract AgentMarket is
 
         // 2. transfer iNFT
         if (proofs.length > 0) {
-            AgentNFT(agentNFT).iTransferFrom(
-                seller,
-                buyer,
-                order.tokenId,
-                proofs
-            );
+            AgentNFT(agentNFT).iTransferFrom(seller, buyer, order.tokenId, proofs);
         } else {
             AgentNFT(agentNFT).transferFrom(seller, buyer, order.tokenId);
         }
@@ -169,13 +160,7 @@ contract AgentMarket is
         usedOrders[uint256(order.nonce)] = true;
         usedOffers[uint256(offer.nonce)] = true;
 
-        emit OrderFulfilled(
-            seller,
-            buyer,
-            order.tokenId,
-            offer.offerPrice,
-            order.currency
-        );
+        emit OrderFulfilled(seller, buyer, order.tokenId, offer.offerPrice, order.currency);
     }
 
     function deposit(address account) external payable {
@@ -187,10 +172,7 @@ contract AgentMarket is
     }
 
     function withdraw(address account, uint256 amount) external {
-        require(
-            msg.sender == account || msg.sender == admin,
-            "Only the account or admin can withdraw"
-        );
+        require(msg.sender == account || msg.sender == admin, "Only the account or admin can withdraw");
         require(balances[account] >= amount, "Insufficient balance");
         require(account != address(0), "Invalid address");
         require(!paused(), "Contract is paused");
@@ -203,9 +185,7 @@ contract AgentMarket is
         return balances[account];
     }
 
-    function _validateOrder(
-        Order calldata order
-    ) internal view returns (address) {
+    function _validateOrder(Order calldata order) internal view returns (address) {
         // 1.1 verify expiration
         require(block.timestamp <= order.expireTime, "Order expired");
         // 1.2 verify price
@@ -220,10 +200,7 @@ contract AgentMarket is
         return seller;
     }
 
-    function _validateOffer(
-        Offer calldata offer,
-        Order calldata order
-    ) internal view returns (address) {
+    function _validateOffer(Offer calldata offer, Order calldata order) internal view returns (address) {
         require(block.timestamp <= offer.expireTime, "Offer expired");
         require(offer.offerPrice >= order.expectedPrice, "Price too low");
         require(offer.tokenId == order.tokenId, "TokenId mismatch");
@@ -238,9 +215,7 @@ contract AgentMarket is
         return buyer;
     }
 
-    function _verifyOrderSignature(
-        Order calldata order
-    ) internal view returns (address) {
+    function _verifyOrderSignature(Order calldata order) internal view returns (address) {
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
@@ -257,16 +232,12 @@ contract AgentMarket is
             )
         );
 
-        bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash)
-        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
 
         return digest.recover(order.signature);
     }
 
-    function _verifyOfferSignature(
-        Offer calldata offer
-    ) internal view returns (address) {
+    function _verifyOfferSignature(Offer calldata offer) internal view returns (address) {
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
@@ -281,9 +252,7 @@ contract AgentMarket is
             )
         );
 
-        bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash)
-        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
 
         return digest.recover(offer.signature);
     }
@@ -292,9 +261,7 @@ contract AgentMarket is
         return
             keccak256(
                 abi.encode(
-                    keccak256(
-                        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-                    ),
+                    keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
                     keccak256(bytes("AgentMarket")),
                     keccak256(bytes(VERSION)),
                     block.chainid,
@@ -303,12 +270,7 @@ contract AgentMarket is
             );
     }
 
-    function _handlePayment(
-        uint256 offerPrice,
-        address currency,
-        address buyer,
-        address seller
-    ) internal {
+    function _handlePayment(uint256 offerPrice, address currency, address buyer, address seller) internal {
         uint256 totalAmount = offerPrice;
         uint256 fee = (totalAmount * feeRate) / 10000;
         uint256 sellerAmount = totalAmount - fee;
@@ -330,9 +292,7 @@ contract AgentMarket is
         return feeRate;
     }
 
-    function getFeeBalance(
-        address currency
-    ) external view override returns (uint256) {
+    function getFeeBalance(address currency) external view override returns (uint256) {
         return feeBalances[currency];
     }
 
@@ -345,6 +305,7 @@ contract AgentMarket is
     }
 
     event MintFeeUpdated(uint256 mintFee);
+
     // for paid mint
     function setMintFee(uint256 newMintFee) external onlyRole(ADMIN_ROLE) {
         mintFee = newMintFee;
@@ -352,9 +313,8 @@ contract AgentMarket is
     }
 
     event DiscountMintFeeUpdated(uint256 discountMintFee);
-    function setDiscountMintFee(
-        uint256 newDiscountMintFee
-    ) external onlyRole(ADMIN_ROLE) {
+
+    function setDiscountMintFee(uint256 newDiscountMintFee) external onlyRole(ADMIN_ROLE) {
         discountMintFee = newDiscountMintFee;
         emit DiscountMintFeeUpdated(discountMintFee);
     }
@@ -367,22 +327,11 @@ contract AgentMarket is
         return discountMintFee;
     }
 
-    event PaidMinted(
-        uint256 indexed tokenId,
-        address indexed from,
-        address indexed to,
-        uint256 mintFee
-    );
-    function paidMint(
-        IntelligentData[] calldata iDatas,
-        address to,
-        bool isDiscount
-    ) external onlyRole(ADMIN_ROLE) {
+    event PaidMinted(uint256 indexed tokenId, address indexed from, address indexed to, uint256 mintFee);
+
+    function paidMint(IntelligentData[] calldata iDatas, address to, bool isDiscount) external onlyRole(ADMIN_ROLE) {
         uint256 requiredFee = isDiscount ? discountMintFee : mintFee;
-        require(
-            balances[to] >= requiredFee,
-            "Insufficient balance for mint fee"
-        );
+        require(balances[to] >= requiredFee, "Insufficient balance for mint fee");
         require(to != address(0), "Invalid recipient");
         require(!paused(), "Contract is paused");
         balances[to] -= requiredFee;
