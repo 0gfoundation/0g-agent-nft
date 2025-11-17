@@ -4,9 +4,12 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+
 import "./extensions/ERC7857CloneableUpgradeable.sol";
+import "./extensions/ERC7857AuthorizeUpgradeable.sol";
 import "./interfaces/IERC7857DataVerifier.sol";
 import "./Utils.sol";
 
@@ -14,7 +17,8 @@ contract AgentNFT is
     AccessControlUpgradeable,
     ReentrancyGuardUpgradeable,
     PausableUpgradeable,
-    ERC7857CloneableUpgradeable
+    ERC7857CloneableUpgradeable,
+    ERC7857AuthorizeUpgradeable
 {
     /// @notice The event emitted when the admin is changed
     /// @param _oldAdmin The old admin
@@ -151,4 +155,15 @@ contract AgentNFT is
     }
 
     event AuthorizedUsersCleared(address indexed owner, uint256 indexed tokenId);
+
+    /*=== override ===*/
+    function _update(
+        address to,
+        uint256 tokenId,
+        address auth
+    ) internal override(ERC721Upgradeable, ERC7857AuthorizeUpgradeable) returns (address) {
+        address from = super._update(to, tokenId, auth);
+
+        return from;
+    }
 }

@@ -4,7 +4,6 @@ pragma solidity ^0.8.20;
 import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {ERC165Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import {IERC7857} from "./interfaces/IERC7857.sol";
 import {IntelligentData} from "./interfaces/IERC7857Metadata.sol";
@@ -13,12 +12,9 @@ import {IERC7857DataVerifier, TransferValidityProof, TransferValidityProofOutput
 import "./Utils.sol";
 
 contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
-    using EnumerableSet for EnumerableSet.AddressSet;
-
     /// @custom:storage-location erc7857:0g.storage.ERC7857
     struct ERC7857Storage {
         mapping(uint tokenId => IntelligentData[]) iDatas;
-        mapping(uint tokenId => EnumerableSet.AddressSet) authorizedUsers;
         mapping(address owner => address) accessAssistants;
         IERC7857DataVerifier verifier;
     }
@@ -32,8 +28,6 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
             $.slot := ERC7857StorageLocation
         }
     }
-
-    uint public constant MAX_AUTHORIZED_USERS = 100;
 
     constructor() {
         _disableInitializers();
@@ -63,44 +57,6 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
         bytes4 interfaceId
     ) public view virtual override(ERC721Upgradeable, IERC165) returns (bool) {
         return interfaceId == type(IERC7857).interfaceId || super.supportsInterface(interfaceId);
-    }
-
-    function _authorizeUsage(uint256 tokenId, address to) internal {
-        ERC7857Storage storage $ = _getERC7857Storage();
-
-        EnumerableSet.AddressSet storage authorizedUsers = $.authorizedUsers[tokenId];
-
-        if (authorizedUsers.length() > MAX_AUTHORIZED_USERS) {
-            revert ERC7857TooManyAuthorizedUsers();
-        }
-
-        if (authorizedUsers.contains(to)) {
-            revert ERC7857AlreadyAuthorized();
-        }
-
-        authorizedUsers.add(to);
-
-        emit Authorization(msg.sender, to, tokenId);
-    }
-
-    function authorizeUsage(uint256 tokenId, address to) public virtual {
-        if (to == address(0)) {
-            revert ERC7857InvalidAuthorizedUser(address(0));
-        }
-
-        if (_ownerOf(tokenId) != msg.sender) {
-            revert ERC721IncorrectOwner(msg.sender, tokenId, _ownerOf(tokenId));
-        }
-
-        _authorizeUsage(tokenId, to);
-    }
-
-    function authorizedUsersOf(uint256 tokenId) public view virtual returns (address[] memory) {
-        ERC7857Storage storage $ = _getERC7857Storage();
-        if (_ownerOf(tokenId) == address(0)) {
-            revert ERC721NonexistentToken(tokenId);
-        }
-        return $.authorizedUsers[tokenId].values();
     }
 
     function delegateAccess(address assistant) public virtual {
@@ -179,21 +135,6 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
         }
     }
 
-    function _clearAuthorized(uint tokenId) internal {
-        ERC7857Storage storage $ = _getERC7857Storage();
-        address[] memory values = $.authorizedUsers[tokenId].values();
-        for (uint i = 0; i < values.length; ++i) {
-            $.authorizedUsers[tokenId].remove(values[i]);
-        }
-    }
-
-    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
-        address from = super._update(to, tokenId, auth);
-        // clear authorized users
-        _clearAuthorized(tokenId);
-        return from;
-    }
-
     function _updateData(uint256 tokenId, IntelligentData[] memory newDatas) internal virtual {
         ERC7857Storage storage $ = _getERC7857Storage();
 
@@ -236,22 +177,6 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
             revert ERC721NonexistentToken(tokenId);
         }
         return $.iDatas[tokenId];
-    }
-
-    function revokeAuthorization(uint256 tokenId, address user) public virtual {
-        ERC7857Storage storage $ = _getERC7857Storage();
-        if (_ownerOf(tokenId) != msg.sender) {
-            revert ERC721InvalidSender(msg.sender);
-        }
-        if (user == address(0)) {
-            revert ERC7857InvalidAuthorizedUser(user);
-        }
-
-        if (!$.authorizedUsers[tokenId].remove(user)) {
-            revert ERC7857NotAuthorized();
-        }
-
-        emit AuthorizationRevoked(msg.sender, user, tokenId);
     }
 
     function verifier() public view virtual returns (IERC7857DataVerifier) {

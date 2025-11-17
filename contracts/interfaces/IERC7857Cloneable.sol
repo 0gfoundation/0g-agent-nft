@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC7857Metadata} from "./IERC7857Metadata.sol";
+import {IERC7857} from "./IERC7857.sol";
 import {TransferValidityProof} from "./IERC7857DataVerifier.sol";
 
-interface IERC7857Cloneable is IERC7857Metadata {
+interface IERC7857Cloneable is IERC7857 {
     /// @notice The event emitted when a token is cloned
     /// @param _tokenId The token identifier
     /// @param _newTokenId The new token identifier

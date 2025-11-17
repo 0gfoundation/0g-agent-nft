@@ -6,9 +6,6 @@ import {IERC721} from "@openzeppelin/contracts/interfaces/IERC721.sol";
 import {IERC7857Metadata, IntelligentData} from "./IERC7857Metadata.sol";
 
 interface IERC7857 is IERC721, IERC7857Metadata {
-    error ERC7857InvalidAuthorizedUser(address);
-    error ERC7857TooManyAuthorizedUsers();
-    error ERC7857AlreadyAuthorized();
     error ERC7857InvalidAssistant(address);
     error ERC7857EmptyProof();
     error ERC7857ProofCountMismatch();
@@ -16,25 +13,12 @@ interface IERC7857 is IERC721, IERC7857Metadata {
     error ERC7857AccessAssistantMismatch();
     error ERC7857WantedReceiverMismatch();
     error ERC7857EncryptedPubKeyMismatch();
-    error ERC7857NotAuthorized();
 
     /// @notice The event minted when data of a token is updated
     /// @param _tokenId the token identifier
     /// @param _oldDatas old token data
     /// @param _newDatas new token data
     event Updated(uint256 indexed _tokenId, IntelligentData[] _oldDatas, IntelligentData[] _newDatas);
-
-    /// @notice The event emitted when an address is authorized to use a token
-    /// @param _from The address that is authorizing
-    /// @param _to The address that is being authorized
-    /// @param _tokenId The token identifier
-    event Authorization(address indexed _from, address indexed _to, uint256 indexed _tokenId);
-
-    /// @notice The event emitted when an address is revoked from using a token
-    /// @param _from The address that is revoking
-    /// @param _to The address that is being revoked
-    /// @param _tokenId The token identifier
-    event AuthorizationRevoked(address indexed _from, address indexed _to, uint256 indexed _tokenId);
 
     /// @notice The event emitted when a sealed key is published
     /// @param _to The address that is receiving
@@ -63,23 +47,9 @@ interface IERC7857 is IERC721, IERC7857Metadata {
         TransferValidityProof[] calldata _proofs
     ) external;
 
-    /// @notice Add authorized user to group
-    /// @param _tokenId The token to add to group
-    function authorizeUsage(uint256 _tokenId, address _user) external;
-
-    /// @notice Revoke authorization from a user
-    /// @param _tokenId The token to revoke authorization from
-    /// @param _user The user to revoke authorization from
-    function revokeAuthorization(uint256 _tokenId, address _user) external;
-
     /// @notice Delegate access check to an assistant
     /// @param _assistant The assistant
     function delegateAccess(address _assistant) external;
-
-    /// @notice Get the authorized users of a token
-    /// @param _tokenId The token identifier
-    /// @return The current authorized users of the token
-    function authorizedUsersOf(uint256 _tokenId) external view returns (address[] memory);
 
     /// @notice Get the delegate access for a user
     /// @param _user The user
