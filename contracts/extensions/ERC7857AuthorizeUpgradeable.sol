@@ -6,7 +6,6 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 import {ERC7857Upgradeable} from "../ERC7857Upgradeable.sol";
 import {IERC7857Authorize} from "../interfaces/IERC7857Authorize.sol";
 import {IntelligentData} from "../interfaces/IERC7857Metadata.sol";
-import {IERC7857DataVerifier, TransferValidityProof, TransferValidityProofOutput} from "../interfaces/IERC7857DataVerifier.sol";
 
 contract ERC7857AuthorizeUpgradeable is IERC7857Authorize, ERC7857Upgradeable {
     using EnumerableSet for EnumerableSet.AddressSet;

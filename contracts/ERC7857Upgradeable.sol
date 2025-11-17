@@ -14,7 +14,6 @@ import "./Utils.sol";
 contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
     /// @custom:storage-location erc7857:0g.storage.ERC7857
     struct ERC7857Storage {
-        mapping(uint tokenId => IntelligentData[]) iDatas;
         mapping(address owner => address) accessAssistants;
         IERC7857DataVerifier verifier;
     }
@@ -94,7 +93,9 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
 
         TransferValidityProofOutput[] memory proofOutput = $.verifier.verifyTransferValidity(proofs);
 
-        if (proofOutput.length != $.iDatas[tokenId].length) {
+        IntelligentData[] memory datas = _intelligentDatasOf(tokenId);
+
+        if (proofOutput.length != datas.length) {
             revert ERC7857ProofCountMismatch();
         }
 
@@ -103,7 +104,7 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
 
         for (uint i = 0; i < proofOutput.length; i++) {
             // require the initial data hash is the same as the old data hash
-            if (proofOutput[i].oldDataHash != $.iDatas[tokenId][i].dataHash) {
+            if (proofOutput[i].oldDataHash != datas[i].dataHash) {
                 revert ERC7857DataHashMismatch();
             }
 
@@ -129,27 +130,13 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
 
             sealedKeys[i] = proofOutput[i].sealedKey;
             newDatas[i] = IntelligentData({
-                dataDescription: $.iDatas[tokenId][i].dataDescription,
+                dataDescription: datas[i].dataDescription,
                 dataHash: proofOutput[i].newDataHash
             });
         }
     }
 
-    function _updateData(uint256 tokenId, IntelligentData[] memory newDatas) internal virtual {
-        ERC7857Storage storage $ = _getERC7857Storage();
-
-        IntelligentData[] memory oldDatas = new IntelligentData[]($.iDatas[tokenId].length);
-        for (uint i = 0; i < $.iDatas[tokenId].length; i++) {
-            oldDatas[i] = $.iDatas[tokenId][i];
-        }
-
-        delete $.iDatas[tokenId];
-        for (uint i = 0; i < newDatas.length; i++) {
-            $.iDatas[tokenId].push(newDatas[i]);
-        }
-
-        emit Updated(tokenId, oldDatas, newDatas);
-    }
+    function _updateData(uint256 tokenId, IntelligentData[] memory newDatas) internal virtual {}
 
     function _transfer(address from, address to, uint256 tokenId, TransferValidityProof[] calldata proofs) internal {
         (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) = _proofCheck(from, to, tokenId, proofs);
@@ -171,12 +158,20 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
         _transfer(from, to, tokenId, proofs);
     }
 
+    /**
+     * @notice Empty by default, can be overridden in child contracts.
+     */
+    function _intelligentDatasOf(
+        uint //_tokenId
+    ) internal view virtual returns (IntelligentData[] memory) {
+        return new IntelligentData[](0);
+    }
+
     function intelligentDatasOf(uint256 tokenId) public view virtual returns (IntelligentData[] memory) {
-        ERC7857Storage storage $ = _getERC7857Storage();
         if (_ownerOf(tokenId) == address(0)) {
             revert ERC721NonexistentToken(tokenId);
         }
-        return $.iDatas[tokenId];
+        return _intelligentDatasOf(tokenId);
     }
 
     function verifier() public view virtual returns (IERC7857DataVerifier) {
