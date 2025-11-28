@@ -7,7 +7,11 @@ import {ERC165Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/intro
 
 import {IERC7857} from "./interfaces/IERC7857.sol";
 import {IntelligentData} from "./interfaces/IERC7857Metadata.sol";
-import {IERC7857DataVerifier, TransferValidityProof, TransferValidityProofOutput} from "./interfaces/IERC7857DataVerifier.sol";
+import {
+    IERC7857DataVerifier,
+    TransferValidityProof,
+    TransferValidityProofOutput
+} from "./interfaces/IERC7857DataVerifier.sol";
 
 import "./Utils.sol";
 

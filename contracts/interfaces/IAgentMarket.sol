@@ -20,6 +20,7 @@ struct Offer {
     uint256 offerPrice;
     uint256 expireTime;
     bytes32 nonce;
+    bool needProof;
     bytes signature;
 }
 

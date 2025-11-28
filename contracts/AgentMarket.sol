@@ -142,7 +142,7 @@ contract AgentMarket is
         address buyer = _validateOffer(offer, order);
 
         // 2. transfer iNFT
-        if (proofs.length > 0) {
+        if (offer.needProof) {
             AgentNFT(agentNFT).iTransferFrom(seller, buyer, order.tokenId, proofs);
         } else {
             AgentNFT(agentNFT).transferFrom(seller, buyer, order.tokenId);
@@ -241,11 +241,12 @@ contract AgentMarket is
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
-                    "Offer(uint256 tokenId,uint256 offeredPrice,uint256 expireTime,bytes32 nonce,uint256 chainId,address verifyingContract)"
+                    "Offer(uint256 tokenId,uint256 offeredPrice,uint256 expireTime,bool needProof,bytes32 nonce,uint256 chainId,address verifyingContract)"
                 ),
                 offer.tokenId,
                 offer.offerPrice,
                 offer.expireTime,
+                offer.needProof,
                 offer.nonce,
                 block.chainid,
                 address(this)
