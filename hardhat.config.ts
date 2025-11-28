@@ -5,6 +5,8 @@ import "hardhat-deploy";
 import "hardhat-deploy-ethers";
 dotenv.config();
 
+import "./src/tasks/codesize";
+
 const ZG_TESTNET_NETWORK_NAME = process.env.ZG_TESTNET_NETWORK_NAME;
 const ZG_MAINNET_NETWORK_NAME = process.env.ZG_MAINNET_NETWORK_NAME;
 const ZG_TESTNET_RPC_URL = process.env.ZG_TESTNET_RPC_URL;

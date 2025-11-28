@@ -20,10 +20,7 @@ abstract contract BaseVerifier is IERC7857DataVerifier {
     function cleanExpiredProofs(bytes32[] calldata proofNonces) external {
         for (uint256 i = 0; i < proofNonces.length; i++) {
             bytes32 nonce = proofNonces[i];
-            if (
-                usedProofs[nonce] &&
-                block.timestamp > proofTimestamps[nonce] + 7 days
-            ) {
+            if (usedProofs[nonce] && block.timestamp > proofTimestamps[nonce] + 7 days) {
                 delete usedProofs[nonce];
                 delete proofTimestamps[nonce];
             }

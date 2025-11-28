@@ -28,10 +28,7 @@ contract TEEVerifier is Initializable {
         _disableInitializers();
     }
 
-    function initialize(
-        bytes memory tdxQuote,
-        TrustedMeasurements memory expected
-    ) public initializer {
+    function initialize(bytes memory tdxQuote, TrustedMeasurements memory expected) public initializer {
         TrustedMeasurements memory actual = _extractMeasurements(tdxQuote);
 
         require(actual.mrtd == expected.mrtd, "Untrusted TD base");
@@ -46,24 +43,17 @@ contract TEEVerifier is Initializable {
         verified = true;
     }
 
-    function verifyTEESignature(
-        bytes32 dataHash,
-        bytes calldata signature
-    ) external view returns (bool) {
+    function verifyTEESignature(bytes32 dataHash, bytes calldata signature) external view returns (bool) {
         address signer = dataHash.recover(signature);
         return signer == teeAddress;
     }
 
-    function _extractPublicKey(
-        bytes memory quote
-    ) internal pure returns (address) {
+    function _extractPublicKey(bytes memory quote) internal pure returns (address) {
         // mock, need to extract from quote
         return 0x168752bb1d04b4c93F3ED0a6e8F84534b16F2014;
     }
 
-    function _extractMeasurements(
-        bytes memory quote
-    ) internal pure returns (TrustedMeasurements memory) {
+    function _extractMeasurements(bytes memory quote) internal pure returns (TrustedMeasurements memory) {
         return
             TrustedMeasurements({
                 mrtd: bytes32(0),
