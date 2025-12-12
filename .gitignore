@@ -8,3 +8,4 @@ dist
 cache
 artifacts
 deployments
+external-types

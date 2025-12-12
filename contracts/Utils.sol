@@ -2,34 +2,21 @@
 pragma solidity ^0.8.20;
 
 library Utils {
-    function toString(uint256 value) internal pure returns (string memory) {
-        if (value == 0) {
-            return "0";
+    function bytesToHexString(bytes memory data) internal pure returns (string memory) {
+        bytes memory alphabet = "0123456789abcdef";
+        bytes memory str = new bytes(2 * data.length);
+        
+        for (uint i = 0; i < data.length; i++) {
+            str[2 * i] = alphabet[uint8(data[i] >> 4)];
+            str[2 * i + 1] = alphabet[uint8(data[i] & 0x0f)];
         }
-        uint256 temp = value;
-        uint256 digits;
-        while (temp != 0) {
-            digits++;
-            temp /= 10;
-        }
-        bytes memory buffer = new bytes(digits);
-        while (value != 0) {
-            digits -= 1;
-            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
-            value /= 10;
-        }
-        return string(buffer);
+        
+        return string(str);
     }
 
-    function hexToString(
-        bytes memory data
-    ) internal pure returns (string memory) {
-        return string(abi.encodePacked(data));
-    }
-
-    function isEqual(
-        bytes32[] memory arr1,
-        bytes32[] memory arr2
+    function bytesEqual(
+        bytes memory arr1,
+        bytes memory arr2
     ) internal pure returns (bool) {
         if (arr1.length != arr2.length) {
             return false;

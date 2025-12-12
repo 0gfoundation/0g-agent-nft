@@ -1,29 +1,65 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.20;
 
-import "./IERC7857DataVerifier.sol";
+import {IERC7857DataVerifier, TransferValidityProof} from "./IERC7857DataVerifier.sol";
+import {IERC7857Metadata} from "./IERC7857Metadata.sol";
 
 interface IERC7857 {
-    /// @dev This emits when a new functional NFT is minted
-    event Minted(
-        uint256 indexed _tokenId,
-        address indexed _creator,
-        address indexed _owner,
-        bytes32[] _dataHashes,
-        string[] _dataDescriptions
+    /// @notice The event emitted when an address is approved to transfer a token
+    /// @param _from The address that is approving
+    /// @param _to The address that is being approved
+    /// @param _tokenId The token identifier
+    event Approval(
+        address indexed _from,
+        address indexed _to,
+        uint256 indexed _tokenId
     );
 
-    /// @dev This emits when a user is authorized to use the data
-    event AuthorizedUsage(uint256 indexed _tokenId, address indexed _user);
+    /// @notice The event emitted when an address is approved for all
+    /// @param _owner The owner
+    /// @param _operator The operator
+    /// @param _approved The approval
+    event ApprovalForAll(
+        address indexed _owner,
+        address indexed _operator,
+        bool _approved
+    );
 
-    /// @dev This emits when data is transferred with ownership
+    /// @notice The event emitted when an address is authorized to use a token
+    /// @param _from The address that is authorizing
+    /// @param _to The address that is being authorized
+    /// @param _tokenId The token identifier
+    event Authorization(
+        address indexed _from,
+        address indexed _to,
+        uint256 indexed _tokenId
+    );
+
+    /// @notice The event emitted when an address is revoked from using a token
+    /// @param _from The address that is revoking
+    /// @param _to The address that is being revoked
+    /// @param _tokenId The token identifier
+    event AuthorizationRevoked(
+        address indexed _from,
+        address indexed _to,
+        uint256 indexed _tokenId
+    );
+
+    /// @notice The event emitted when a token is transferred
+    /// @param _tokenId The token identifier
+    /// @param _from The address that is transferring
+    /// @param _to The address that is receiving
     event Transferred(
         uint256 _tokenId,
         address indexed _from,
         address indexed _to
     );
 
-    /// @dev This emits when data is cloned
+    /// @notice The event emitted when a token is cloned
+    /// @param _tokenId The token identifier
+    /// @param _newTokenId The new token identifier
+    /// @param _from The address that is cloning
+    /// @param _to The address that is receiving
     event Cloned(
         uint256 indexed _tokenId,
         uint256 indexed _newTokenId,
@@ -31,36 +67,46 @@ interface IERC7857 {
         address _to
     );
 
-    /// @dev This emits when a sealed key is published
+    /// @notice The event emitted when a sealed key is published
+    /// @param _to The address that is receiving
+    /// @param _tokenId The token identifier
+    /// @param _sealedKeys The sealed keys
     event PublishedSealedKey(
         address indexed _to,
         uint256 indexed _tokenId,
-        bytes16[] _sealedKeys
+        bytes[] _sealedKeys
     );
+
+    /// @notice The event emitted when a user is delegated to an assistant
+    /// @param _user The user
+    /// @param _assistant The assistant
+    event DelegateAccess(address indexed _user, address indexed _assistant);
+
+    /// @notice The event emitted when the admin is changed
+    /// @param _oldAdmin The old admin
+    /// @param _newAdmin The new admin
+    event AdminChanged(address indexed _oldAdmin, address indexed _newAdmin);
 
     /// @notice The verifier interface that this NFT uses
     /// @return The address of the verifier contract
     function verifier() external view returns (IERC7857DataVerifier);
 
-    /// @notice Mint new functional NFT with functional data ownership proof
-    /// @param _proofs Proof of data ownership
-    /// @param _dataDescriptions Descriptions of the data
-    /// @return _tokenId The ID of the newly minted token
-    /// @param _to The address to mint the token for, if _to is not set, the token will be minted for the caller
-    function mint(
-        bytes[] calldata _proofs,
-        string[] calldata _dataDescriptions,
-        address _to
-    ) external payable returns (uint256 _tokenId);
+    /// @notice Get the admin of the NFT
+    /// @return The address of the admin
+    function admin() external view returns (address);
+
+    /// @notice Set the admin of the NFT
+    /// @param newAdmin The new admin
+    function setAdmin(address newAdmin) external;
 
     /// @notice Transfer data with ownership
     /// @param _to Address to transfer data to
     /// @param _tokenId The token to transfer data for
     /// @param _proofs Proofs of data available for _to
-    function transfer(
+    function iTransfer(
         address _to,
         uint256 _tokenId,
-        bytes[] calldata _proofs
+        TransferValidityProof[] calldata _proofs
     ) external;
 
     /// @notice Clone data
@@ -68,29 +114,34 @@ interface IERC7857 {
     /// @param _tokenId The token to clone data for
     /// @param _proofs Proofs of data available for _to
     /// @return _newTokenId The ID of the newly cloned token
-    function clone(
+    function iClone(
         address _to,
         uint256 _tokenId,
-        bytes[] calldata _proofs
-    ) external payable returns (uint256 _newTokenId);
-
-    /// @notice Transfer public data with ownership
-    /// @param _to Address to transfer data to
-    /// @param _tokenId The token to transfer data for
-    function transferPublic(address _to, uint256 _tokenId) external;
-
-    /// @notice Clone public data
-    /// @param _to Address to clone data to
-    /// @param _tokenId The token to clone data for
-    /// @return _newTokenId The ID of the newly cloned token
-    function clonePublic(
-        address _to,
-        uint256 _tokenId
-    ) external payable returns (uint256 _newTokenId);
+        TransferValidityProof[] calldata _proofs
+    ) external returns (uint256 _newTokenId);
 
     /// @notice Add authorized user to group
     /// @param _tokenId The token to add to group
     function authorizeUsage(uint256 _tokenId, address _user) external;
+
+    /// @notice Revoke authorization from a user
+    /// @param _tokenId The token to revoke authorization from
+    /// @param _user The user to revoke authorization from
+    function revokeAuthorization(uint256 _tokenId, address _user) external;
+
+    /// @notice Approve an address to transfer a token
+    /// @param _to The address to approve
+    /// @param _tokenId The token identifier
+    function approve(address _to, uint256 _tokenId) external;
+
+    /// @notice Set approval for all
+    /// @param _operator The operator
+    /// @param _approved The approval
+    function setApprovalForAll(address _operator, bool _approved) external;
+
+    /// @notice Delegate access check to an assistant
+    /// @param _assistant The assistant
+    function delegateAccess(address _assistant) external;
 
     /// @notice Get token owner
     /// @param _tokenId The token identifier
@@ -103,4 +154,23 @@ interface IERC7857 {
     function authorizedUsersOf(
         uint256 _tokenId
     ) external view returns (address[] memory);
+
+    /// @notice Get the approved address for a token
+    /// @param _tokenId The token identifier
+    /// @return The approved address
+    function getApproved(uint256 _tokenId) external view returns (address);
+
+    /// @notice Check if an address is approved for all
+    /// @param _owner The owner
+    /// @param _operator The operator
+    /// @return The approval
+    function isApprovedForAll(
+        address _owner,
+        address _operator
+    ) external view returns (bool);
+
+    /// @notice Get the delegate access for a user
+    /// @param _user The user
+    /// @return The delegate access
+    function getDelegateAccess(address _user) external view returns (address);
 }

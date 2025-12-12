@@ -5,10 +5,24 @@ import "hardhat-deploy";
 import "hardhat-deploy-ethers";
 dotenv.config();
 
+const ZG_TESTNET_NETWORK_NAME = process.env.ZG_TESTNET_NETWORK_NAME;
+const ZG_MAINNET_NETWORK_NAME = process.env.ZG_MAINNET_NETWORK_NAME;
+const ZG_TESTNET_RPC_URL = process.env.ZG_TESTNET_RPC_URL;
+const ZG_MAINNET_RPC_URL = process.env.ZG_MAINNET_RPC_URL;
+const ZG_TESTNET_CHAIN_ID = process.env.ZG_TESTNET_CHAIN_ID;
+const ZG_MAINNET_CHAIN_ID = process.env.ZG_MAINNET_CHAIN_ID;
 const ZG_TESTNET_PRIVATE_KEY = process.env.ZG_TESTNET_PRIVATE_KEY;
+const ZG_MAINNET_PRIVATE_KEY = process.env.ZG_MAINNET_PRIVATE_KEY;
 const ZG_AGENT_NFT_CREATOR_PRIVATE_KEY = process.env.ZG_AGENT_NFT_CREATOR_PRIVATE_KEY;
 const ZG_AGENT_NFT_ALICE_PRIVATE_KEY = process.env.ZG_AGENT_NFT_ALICE_PRIVATE_KEY;
 const ZG_AGENT_NFT_BOB_PRIVATE_KEY = process.env.ZG_AGENT_NFT_BOB_PRIVATE_KEY;
+const ZG_TESTNET_ETHERSCAN_BROWSER_URL = process.env.ZG_TESTNET_ETHERSCAN_BROWSER_URL;
+const ZG_TESTNET_ETHERSCAN_API_URL = process.env.ZG_TESTNET_ETHERSCAN_API_URL;
+const ZG_MAINNET_ETHERSCAN_BROWSER_URL = process.env.ZG_MAINNET_ETHERSCAN_BROWSER_URL;
+const ZG_MAINNET_ETHERSCAN_API_URL = process.env.ZG_MAINNET_ETHERSCAN_API_URL;
+const LOCAL_DEPLOYMENTS_PATH = process.env.LOCAL_DEPLOYMENTS_PATH;
+const ZG_TESTNET_DEPLOYMENTS_PATH = process.env.ZG_TESTNET_DEPLOYMENTS_PATH;
+const ZG_MAINNET_DEPLOYMENTS_PATH = process.env.ZG_MAINNET_DEPLOYMENTS_PATH;
 
 const config: HardhatUserConfig = {
   paths: {
@@ -51,20 +65,49 @@ const config: HardhatUserConfig = {
       tags: ["test", "local"]
     },
     zgTestnet: {
-      url: "https://evmrpc-testnet.0g.ai",
+      url: ZG_TESTNET_RPC_URL || "",
       accounts: [ZG_TESTNET_PRIVATE_KEY || ""],
-      chainId: 16600,
+      chainId: Number(ZG_TESTNET_CHAIN_ID) || 16602,
       live: true,
       saveDeployments: true,
       tags: ["staging"]
     },
+    zgMainnet: {
+      url: ZG_MAINNET_RPC_URL || "",
+      accounts: [ZG_MAINNET_PRIVATE_KEY || ""],
+      chainId: Number(ZG_MAINNET_CHAIN_ID) || 16661,
+      live: true,
+      saveDeployments: true,
+      tags: ["production"]
+    },
+  },
+  etherscan: {
+    apiKey: {
+      zgTestnet: "00",
+      zgMainnet: "00",
+    },
+    customChains: [
+      {
+        network: ZG_TESTNET_NETWORK_NAME || "zgTestnet",
+        chainId: Number(ZG_TESTNET_CHAIN_ID) || 16602,
+        urls: {
+          apiURL: ZG_TESTNET_ETHERSCAN_API_URL || "",
+          browserURL: ZG_TESTNET_ETHERSCAN_BROWSER_URL || "",
+        },
+      },
+      {
+        network: ZG_MAINNET_NETWORK_NAME || "zgMainnet",
+        chainId: Number(ZG_MAINNET_CHAIN_ID) || 16661,
+        urls: {
+          apiURL: ZG_MAINNET_ETHERSCAN_API_URL || "",
+          browserURL: ZG_MAINNET_ETHERSCAN_BROWSER_URL || "",
+        },
+      },
+    ],
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
     currency: "USD",
-  },
-  etherscan: {
-    apiKey: process.env.ETHERSCAN_API_KEY,
   },
   namedAccounts: {
     deployer: {
@@ -93,8 +136,9 @@ const config: HardhatUserConfig = {
       },
     ],
     deployments: {
-      hardhat: ["deployments/hardhat"],
-      zgTestnet: ["deployments/zgTestnet"],
+      hardhat: [LOCAL_DEPLOYMENTS_PATH || "deployments/hardhat"],
+      zgTestnet: [ZG_TESTNET_DEPLOYMENTS_PATH || "deployments/zgTestnet"],
+      zgMainnet: [ZG_MAINNET_DEPLOYMENTS_PATH || "deployments/zgMainnet"],
     },
   },
   typechain: {

@@ -17,7 +17,11 @@
   "typechain": {
     "outDir": "typechain",
     "target": "ethers-v5",
-    "files": ["artifacts/contracts/**/*.json"]
+    "files": [
+      "artifacts/contracts/**/*.json"
+    ]
   },
-  "files": ["./hardhat.config.ts"]
+  "files": [
+    "./hardhat.config.ts"
+  ]
 }
