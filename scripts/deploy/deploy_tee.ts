@@ -2,14 +2,6 @@ import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { CONTRACTS, deployInBeaconProxy } from "../utils/utils";
 
-interface TrustedMeasurementsStruct {
-    mrtd: string;
-    rtmr0: string;
-    rtmr1: string;
-    rtmr2: string;
-    rtmr3: string;
-}
-
 const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     const { getNamedAccounts } = hre;
     const { deployer } = await getNamedAccounts();
@@ -24,28 +16,13 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 
     console.log("📝 Deploying TEEVerifier with Beacon Proxy...");
 
-    const tdxQuote = process.env.TDX_QUOTE || "0x00";
-
-    const trustedMeasurements: TrustedMeasurementsStruct = {
-        mrtd: process.env.TRUSTED_MRTD || "0x0000000000000000000000000000000000000000000000000000000000000000",
-        rtmr0: process.env.TRUSTED_RTMR0 || "0x0000000000000000000000000000000000000000000000000000000000000000",
-        rtmr1: process.env.TRUSTED_RTMR1 || "0x0000000000000000000000000000000000000000000000000000000000000000",
-        rtmr2: process.env.TRUSTED_RTMR2 || "0x0000000000000000000000000000000000000000000000000000000000000000",
-        rtmr3: process.env.TRUSTED_RTMR3 || "0x0000000000000000000000000000000000000000000000000000000000000000"
-    };
-
-    console.log("📋 Using trusted measurements:");
-    console.log("  MRTD:", trustedMeasurements.mrtd);
-    console.log("  RTMR0:", trustedMeasurements.rtmr0);
-    console.log("  RTMR1:", trustedMeasurements.rtmr1);
-    console.log("  RTMR2:", trustedMeasurements.rtmr2);
-    console.log("  RTMR3:", trustedMeasurements.rtmr3);
+    const oracleAddress = process.env.ORACLE_ADDRESS || "0x04581d192d22510ced643eaced12ef169644811a";
 
     const TEEVerifierFactory = await hre.ethers.getContractFactory("TEEVerifier");
 
     const initializeData = TEEVerifierFactory.interface.encodeFunctionData("initialize", [
-        tdxQuote,
-        trustedMeasurements
+        deployer,
+        oracleAddress
     ]);
 
     await deployInBeaconProxy(
@@ -60,12 +37,10 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     console.log("✅ TEEVerifier deployed at:", teeVerifierDeployment.address);
 
     const teeVerifier = await hre.ethers.getContractAt("TEEVerifier", teeVerifierDeployment.address);
-    const isVerified = await teeVerifier.verified();
-    const teeAddress = await teeVerifier.teeAddress();
+    const teeOracleAddress = await teeVerifier.teeOracleAddress();
 
     console.log("🔍 Deployment verification:");
-    console.log("  Verified:", isVerified);
-    console.log("  TEE Address:", teeAddress);
+    console.log("  TEE Oracle Address:", teeOracleAddress);
 };
 
 func.tags = ["tee-verifier", "core", "prod"];

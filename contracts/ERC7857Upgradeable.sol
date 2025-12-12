@@ -83,7 +83,7 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
         address to,
         uint256 tokenId,
         TransferValidityProof[] calldata proofs
-    ) internal returns (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) {
+    ) internal returns (bytes[] memory sealedKeys) {
         ERC7857Storage storage $ = _getERC7857Storage();
         if (to == address(0)) {
             revert ERC721InvalidReceiver(to);
@@ -104,11 +104,10 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
         }
 
         sealedKeys = new bytes[](proofOutput.length);
-        newDatas = new IntelligentData[](proofOutput.length);
 
         for (uint i = 0; i < proofOutput.length; i++) {
-            // require the initial data hash is the same as the old data hash
-            if (proofOutput[i].oldDataHash != datas[i].dataHash) {
+            // require the token's data hash is the same as the data hash in the proof
+            if (proofOutput[i].dataHash != datas[i].dataHash) {
                 revert ERC7857DataHashMismatch();
             }
 
@@ -118,34 +117,28 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
             }
 
             bytes memory wantedKey = proofOutput[i].wantedKey;
-            bytes memory encryptedPubKey = proofOutput[i].encryptedPubKey;
+            bytes memory targetPubkey = proofOutput[i].targetPubkey;
             if (wantedKey.length == 0) {
                 // if the wanted key is empty, the default wanted receiver is receiver itself
-                address defaultWantedReceiver = Utils.pubKeyToAddress(encryptedPubKey);
+                address defaultWantedReceiver = Utils.pubKeyToAddress(targetPubkey);
                 if (defaultWantedReceiver != to) {
                     revert ERC7857WantedReceiverMismatch();
                 }
             } else {
                 // if the wanted key is not empty, the data is private
-                if (!Utils.bytesEqual(encryptedPubKey, wantedKey)) {
-                    revert ERC7857EncryptedPubKeyMismatch();
+                if (!Utils.bytesEqual(targetPubkey, wantedKey)) {
+                    revert ERC7857TargetPubkeyMismatch();
                 }
             }
 
             sealedKeys[i] = proofOutput[i].sealedKey;
-            newDatas[i] = IntelligentData({
-                dataDescription: datas[i].dataDescription,
-                dataHash: proofOutput[i].newDataHash
-            });
         }
     }
 
     function _transfer(address from, address to, uint256 tokenId, TransferValidityProof[] calldata proofs) internal {
-        (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) = _proofCheck(from, to, tokenId, proofs);
+        bytes[] memory sealedKeys = _proofCheck(from, to, tokenId, proofs);
 
         transferFrom(from, to, tokenId);
-
-        _updateData(tokenId, newDatas);
 
         emit PublishedSealedKey(to, tokenId, sealedKeys);
     }
@@ -156,7 +149,7 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
         uint256 tokenId,
         TransferValidityProof[] calldata proofs
     ) public virtual {
-        // owner and authority will be checked in _update()
+        // owner and authority will be checked in _proofCheck()
         _transfer(from, to, tokenId, proofs);
     }
 

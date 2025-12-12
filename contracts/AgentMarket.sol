@@ -153,9 +153,6 @@ contract AgentMarket is
             _handlePayment(offer.offerPrice, order.currency, buyer, seller);
         }
 
-        if (order.receiver != address(0)) {
-            require(buyer == order.receiver, "Receiver mismatch");
-        }
         // 4. mark order and offer as used
         usedOrders[uint256(order.nonce)] = true;
         usedOffers[uint256(offer.nonce)] = true;

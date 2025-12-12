@@ -4,7 +4,11 @@ pragma solidity ^0.8.20;
 import {ERC7857Upgradeable} from "../ERC7857Upgradeable.sol";
 import {IERC7857Cloneable} from "../interfaces/IERC7857Cloneable.sol";
 import {IntelligentData} from "../interfaces/IERC7857Metadata.sol";
-import {IERC7857DataVerifier, TransferValidityProof, TransferValidityProofOutput} from "../interfaces/IERC7857DataVerifier.sol";
+import {
+    IERC7857DataVerifier,
+    TransferValidityProof,
+    TransferValidityProofOutput
+} from "../interfaces/IERC7857DataVerifier.sol";
 
 contract ERC7857CloneableUpgradeable is IERC7857Cloneable, ERC7857Upgradeable {
     /// @custom:storage-location erc7857:0g.storage.ERC7857Cloneable
@@ -34,11 +38,12 @@ contract ERC7857CloneableUpgradeable is IERC7857Cloneable, ERC7857Upgradeable {
         uint256 tokenId,
         TransferValidityProof[] calldata proofs
     ) internal returns (uint256) {
-        (bytes[] memory sealedKeys, IntelligentData[] memory newDatas) = _proofCheck(from, to, tokenId, proofs);
+        bytes[] memory sealedKeys = _proofCheck(from, to, tokenId, proofs);
 
         uint256 newTokenId = _incrementTokenId();
         _safeMint(to, newTokenId);
-        _updateData(newTokenId, newDatas);
+        IntelligentData[] memory datas = _intelligentDatasOf(tokenId);
+        _updateData(newTokenId, datas);
 
         emit Cloned(tokenId, newTokenId, from, to);
         emit PublishedSealedKey(to, newTokenId, sealedKeys);

@@ -12,7 +12,7 @@ interface IERC7857 is IERC721, IERC7857Metadata {
     error ERC7857DataHashMismatch();
     error ERC7857AccessAssistantMismatch();
     error ERC7857WantedReceiverMismatch();
-    error ERC7857EncryptedPubKeyMismatch();
+    error ERC7857TargetPubkeyMismatch();
 
     /// @notice The event minted when data of a token is updated
     /// @param _tokenId the token identifier

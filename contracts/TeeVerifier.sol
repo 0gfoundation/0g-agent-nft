@@ -2,65 +2,89 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
-contract TEEVerifier is Initializable {
+contract TEEVerifier is Initializable, AccessControlUpgradeable, PausableUpgradeable {
     using ECDSA for bytes32;
-    using MessageHashUtils for bytes32;
 
-    struct TrustedMeasurements {
-        bytes32 mrtd;
-        bytes32 rtmr0;
-        bytes32 rtmr1;
-        bytes32 rtmr2;
-        bytes32 rtmr3;
-    }
-
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    address public admin;
     string public constant VERSION = "1.0.0";
+    address public teeOracleAddress;
 
-    TrustedMeasurements public trustedConfig;
-    address public teeAddress;
-    bool public verified;
+    event AdminChanged(address indexed oldAdmin, address indexed newAdmin);
+    event ContractPaused(address indexed admin);
+    event ContractUnpaused(address indexed admin);
+    event OracleAddressUpdated(address indexed oldOracleAddress, address indexed newOracleAddress);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
-    function initialize(bytes memory tdxQuote, TrustedMeasurements memory expected) public initializer {
-        TrustedMeasurements memory actual = _extractMeasurements(tdxQuote);
+    function initialize(address _admin, address _teeOracleAddress) public initializer {
+        require(_admin != address(0), "Invalid admin address");
+        require(_teeOracleAddress != address(0), "Invalid tee oracle address");
 
-        require(actual.mrtd == expected.mrtd, "Untrusted TD base");
-        require(actual.rtmr0 == expected.rtmr0, "Untrusted layer0");
-        require(actual.rtmr1 == expected.rtmr1, "Untrusted layer1");
-        require(actual.rtmr2 == expected.rtmr2, "Untrusted layer2");
-        require(actual.rtmr3 == expected.rtmr3, "Untrusted layer3");
+        __AccessControl_init();
+        __Pausable_init();
 
-        teeAddress = _extractPublicKey(tdxQuote);
+        admin = _admin;
+        teeOracleAddress = _teeOracleAddress;
 
-        trustedConfig = expected;
-        verified = true;
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+        _grantRole(ADMIN_ROLE, _admin);
+        _grantRole(PAUSER_ROLE, _admin);
+    }
+
+    function setAdmin(address newAdmin) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newAdmin != address(0), "Invalid admin address");
+        address oldAdmin = admin;
+
+        if (oldAdmin != newAdmin) {
+            admin = newAdmin;
+
+            _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+            _grantRole(ADMIN_ROLE, newAdmin);
+            _grantRole(PAUSER_ROLE, newAdmin);
+
+            _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+            _revokeRole(ADMIN_ROLE, oldAdmin);
+            _revokeRole(PAUSER_ROLE, oldAdmin);
+
+            emit AdminChanged(oldAdmin, newAdmin);
+        }
     }
 
     function verifyTEESignature(bytes32 dataHash, bytes calldata signature) external view returns (bool) {
+        require(signature.length == 65, "Invalid signature length");
+
         address signer = dataHash.recover(signature);
-        return signer == teeAddress;
+        return signer == teeOracleAddress;
     }
 
-    function _extractPublicKey(bytes memory quote) internal pure returns (address) {
-        // mock, need to extract from quote
-        return 0x168752bb1d04b4c93F3ED0a6e8F84534b16F2014;
+    function updateOracleAddress(address newOracleAddress) public onlyRole(ADMIN_ROLE) {
+        require(newOracleAddress != address(0), "Invalid tee oracle address");
+        address oldOracleAddress = teeOracleAddress;
+        teeOracleAddress = newOracleAddress;
+
+        emit OracleAddressUpdated(oldOracleAddress, newOracleAddress);
     }
 
-    function _extractMeasurements(bytes memory quote) internal pure returns (TrustedMeasurements memory) {
-        return
-            TrustedMeasurements({
-                mrtd: bytes32(0),
-                rtmr0: bytes32(0),
-                rtmr1: bytes32(0),
-                rtmr2: bytes32(0),
-                rtmr3: bytes32(0)
-            });
+    function pause() public onlyRole(PAUSER_ROLE) {
+        _pause();
+        emit ContractPaused(msg.sender);
+    }
+
+    function unpause() public onlyRole(PAUSER_ROLE) {
+        _unpause();
+        emit ContractUnpaused(msg.sender);
+    }
+
+    function isPaused() public view returns (bool) {
+        return paused();
     }
 }
