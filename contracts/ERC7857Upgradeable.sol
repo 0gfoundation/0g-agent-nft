@@ -63,10 +63,7 @@ contract ERC7857Upgradeable is IERC7857, ERC721Upgradeable {
     }
 
     function delegateAccess(address assistant) public virtual {
-        if (assistant == address(0)) {
-            revert ERC7857InvalidAssistant(assistant);
-        }
-
+        // Allow setting to zero address to revoke delegation
         ERC7857Storage storage $ = _getERC7857Storage();
         $.accessAssistants[msg.sender] = assistant;
 

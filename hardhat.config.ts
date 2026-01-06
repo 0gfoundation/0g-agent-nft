@@ -72,7 +72,9 @@ const config: HardhatUserConfig = {
       chainId: Number(ZG_TESTNET_CHAIN_ID) || 16602,
       live: true,
       saveDeployments: true,
-      tags: ["staging"]
+      tags: ["staging"],
+      timeout: 120000, // 120 seconds timeout
+      gasPrice: "auto"
     },
     zgMainnet: {
       url: ZG_MAINNET_RPC_URL || "",
@@ -80,7 +82,9 @@ const config: HardhatUserConfig = {
       chainId: Number(ZG_MAINNET_CHAIN_ID) || 16661,
       live: true,
       saveDeployments: true,
-      tags: ["production"]
+      tags: ["production"],
+      timeout: 120000, // 120 seconds timeout
+      gasPrice: "auto"
     },
   },
   etherscan: {

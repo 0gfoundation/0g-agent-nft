@@ -30,15 +30,25 @@ contract Verifier is
     event AttestationContractUpdated(AttestationConfig[] attestationConfigs);
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    string public constant VERSION = "1.0.0";
 
-    mapping(OracleType => address) public attestationContract;
+    /// @custom:storage-location erc7201:0g.storage.Verifier
+    struct VerifierStorage {
+        address admin;
+        mapping(OracleType => address) attestationContract;
+        uint256 maxProofAge;
+    }
 
-    uint256 public maxProofAge;
+    // keccak256(abi.encode(uint256(keccak256("0g.storage.Verifier")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant VERIFIER_STORAGE_LOCATION =
+        0xbecdd708b48a40f3aa8e2248844b430477e64ef60f94c9d0bf26b790ba82a300;
 
-    address public admin;
-
-    string public constant VERSION = "2.0.0";
+    function _getVerifierStorage() private pure returns (VerifierStorage storage $) {
+        assembly {
+            $.slot := VERIFIER_STORAGE_LOCATION
+        }
+    }
 
     event AdminChanged(address indexed oldAdmin, address indexed newAdmin);
 
@@ -54,37 +64,39 @@ contract Verifier is
         __Pausable_init();
         __ReentrancyGuard_init();
 
+        VerifierStorage storage $ = _getVerifierStorage();
         for (uint256 i = 0; i < _attestationConfigs.length; i++) {
-            attestationContract[_attestationConfigs[i].oracleType] = _attestationConfigs[i].contractAddress;
+            $.attestationContract[_attestationConfigs[i].oracleType] = _attestationConfigs[i].contractAddress;
         }
-        maxProofAge = 7 days;
+        $.maxProofAge = 7 days;
 
         // Set admin state variable
-        admin = _admin;
+        $.admin = _admin;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(ADMIN_ROLE, _admin);
-        _grantRole(PAUSER_ROLE, _admin);
+        _grantRole(OPERATOR_ROLE, _admin);
 
         emit AttestationContractUpdated(_attestationConfigs);
     }
 
     function setAdmin(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newAdmin != address(0), "Invalid admin address");
-        address oldAdmin = admin;
+        VerifierStorage storage $ = _getVerifierStorage();
+        address oldAdmin = $.admin;
 
         if (oldAdmin != newAdmin) {
-            admin = newAdmin;
+            $.admin = newAdmin;
 
             _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
             _grantRole(ADMIN_ROLE, newAdmin);
-            _grantRole(PAUSER_ROLE, newAdmin);
+            _grantRole(OPERATOR_ROLE, newAdmin);
 
             // Only revoke if oldAdmin is not address(0)
             if (oldAdmin != address(0)) {
                 _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
                 _revokeRole(ADMIN_ROLE, oldAdmin);
-                _revokeRole(PAUSER_ROLE, oldAdmin);
+                _revokeRole(OPERATOR_ROLE, oldAdmin);
             }
 
             emit AdminChanged(oldAdmin, newAdmin);
@@ -92,22 +104,24 @@ contract Verifier is
     }
 
     function updateAttestationContract(AttestationConfig[] calldata _attestationConfigs) external onlyRole(ADMIN_ROLE) {
+        VerifierStorage storage $ = _getVerifierStorage();
         for (uint256 i = 0; i < _attestationConfigs.length; i++) {
-            attestationContract[_attestationConfigs[i].oracleType] = _attestationConfigs[i].contractAddress;
+            $.attestationContract[_attestationConfigs[i].oracleType] = _attestationConfigs[i].contractAddress;
         }
 
         emit AttestationContractUpdated(_attestationConfigs);
     }
 
     function updateMaxProofAge(uint256 _maxProofAge) external onlyRole(ADMIN_ROLE) {
-        maxProofAge = _maxProofAge;
+        VerifierStorage storage $ = _getVerifierStorage();
+        $.maxProofAge = _maxProofAge;
     }
 
-    function pause() external onlyRole(PAUSER_ROLE) {
+    function pause() external onlyRole(OPERATOR_ROLE) {
         _pause();
     }
 
-    function unpause() external onlyRole(PAUSER_ROLE) {
+    function unpause() external onlyRole(OPERATOR_ROLE) {
         _unpause();
     }
 
@@ -116,7 +130,8 @@ contract Verifier is
     }
 
     function teeOracleVerify(bytes32 messageHash, bytes memory signature) internal view returns (bool) {
-        return TEEVerifier(attestationContract[OracleType.TEE]).verifyTEESignature(messageHash, signature);
+        VerifierStorage storage $ = _getVerifierStorage();
+        return TEEVerifier($.attestationContract[OracleType.TEE]).verifyTEESignature(messageHash, signature);
     }
 
     /// @notice Extract and verify signature from the access proof
@@ -221,5 +236,15 @@ contract Verifier is
         return outputs;
     }
 
-    uint256[50] private __gap;
+    function admin() public view returns (address) {
+        return _getVerifierStorage().admin;
+    }
+
+    function attestationContract(OracleType oracleType) public view returns (address) {
+        return _getVerifierStorage().attestationContract[oracleType];
+    }
+
+    function maxProofAge() public view returns (uint256) {
+        return _getVerifierStorage().maxProofAge;
+    }
 }

@@ -15,15 +15,8 @@ library Utils {
     }
 
     function bytesEqual(bytes memory arr1, bytes memory arr2) internal pure returns (bool) {
-        if (arr1.length != arr2.length) {
-            return false;
-        }
-        for (uint i = 0; i < arr1.length; i++) {
-            if (arr1[i] != arr2[i]) {
-                return false;
-            }
-        }
-        return true;
+        // More gas efficient - uses keccak256 instead of loop
+        return keccak256(arr1) == keccak256(arr2);
     }
 
     function pubKeyToAddress(bytes memory pubKey) internal pure returns (address) {

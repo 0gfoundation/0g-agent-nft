@@ -25,24 +25,33 @@ contract AgentMarket is
     using SafeERC20 for IERC20;
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
-
-    address public override admin;
-    uint256 private feeRate;
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     uint256 public constant MAX_FEE_RATE = 1000;
-    // 0.1 0G: 100000000000000000
-    uint256 private mintFee;
-    // 0 0G: 0
-    uint256 private discountMintFee;
-
-    address public agentNFT;
-
-    mapping(address => uint256) public feeBalances;
-    mapping(address => uint256) public balances;
-    mapping(uint256 => bool) public usedOrders;
-    mapping(uint256 => bool) public usedOffers;
-
     string public constant VERSION = "1.0.0";
+
+    /// @custom:storage-location erc7201:agent.storage.AgentMarket
+    struct AgentMarketStorage {
+        address admin;
+        uint256 feeRate;
+        uint256 mintFee;
+        uint256 discountMintFee;
+        address agentNFT;
+        mapping(address => uint256) feeBalances;
+        mapping(address => uint256) balances;
+        mapping(uint256 => bool) usedOrders;
+        mapping(uint256 => bool) usedOffers;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("agent.storage.AgentMarket")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant AGENT_MARKET_STORAGE_LOCATION =
+        0xdf1beedbd3d3bce86b126f6986f1edd5f2fcd885f76d774cda1ccb33ea72b400;
+
+    function _getMarketStorage() private pure returns (AgentMarketStorage storage $) {
+        assembly {
+            $.slot := AGENT_MARKET_STORAGE_LOCATION
+        }
+    }
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -64,66 +73,72 @@ contract AgentMarket is
         require(_agentNFT != address(0), "Invalid AgentNFT address");
         require(_initialFeeRate <= MAX_FEE_RATE, "Fee rate too high");
 
-        admin = _admin;
-        agentNFT = _agentNFT;
-        feeRate = _initialFeeRate;
-        mintFee = _initialMintFee;
-        discountMintFee = _initialDiscountMintFee;
+        AgentMarketStorage storage $ = _getMarketStorage();
+        $.admin = _admin;
+        $.agentNFT = _agentNFT;
+        $.feeRate = _initialFeeRate;
+        $.mintFee = _initialMintFee;
+        $.discountMintFee = _initialDiscountMintFee;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(ADMIN_ROLE, _admin);
-        _grantRole(PAUSER_ROLE, _admin);
+        _grantRole(OPERATOR_ROLE, _admin);
+        _grantRole(MINTER_ROLE, _admin);
+    }
+
+    function admin() external view override returns (address) {
+        return _getMarketStorage().admin;
     }
 
     function setAdmin(address newAdmin) external override onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newAdmin != address(0), "Invalid admin address");
-        address oldAdmin = admin;
+        address oldAdmin = _getMarketStorage().admin;
 
         if (oldAdmin != newAdmin) {
-            admin = newAdmin;
+            _getMarketStorage().admin = newAdmin;
 
             _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
             _grantRole(ADMIN_ROLE, newAdmin);
-            _grantRole(PAUSER_ROLE, newAdmin);
 
             _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
             _revokeRole(ADMIN_ROLE, oldAdmin);
-            _revokeRole(PAUSER_ROLE, oldAdmin);
-
             emit AdminChanged(oldAdmin, newAdmin);
         }
     }
 
     function setFeeRate(uint256 newFeeRate) external override onlyRole(ADMIN_ROLE) {
         require(newFeeRate <= MAX_FEE_RATE, "Fee rate too high");
-        uint256 oldFeeRate = feeRate;
-        feeRate = newFeeRate;
+        uint256 oldFeeRate = _getMarketStorage().feeRate;
+        _getMarketStorage().feeRate = newFeeRate;
         emit FeeRateUpdated(oldFeeRate, newFeeRate);
     }
 
     event AgentNFTUpdated(address oldAgentNFT, address newAgentNFT);
 
-    function setAgentNFT(address _agentNFT) external onlyRole(ADMIN_ROLE) {
-        require(_agentNFT != address(0), "Invalid AgentNFT address");
-        address oldAgentNFT = agentNFT;
-        agentNFT = _agentNFT;
-        emit AgentNFTUpdated(oldAgentNFT, _agentNFT);
+    function setAgentNFT(address newAgentNFT) external onlyRole(ADMIN_ROLE) {
+        require(newAgentNFT != address(0), "Invalid AgentNFT address");
+        address oldAgentNFT = _getMarketStorage().agentNFT;
+        _getMarketStorage().agentNFT = newAgentNFT;
+        emit AgentNFTUpdated(oldAgentNFT, newAgentNFT);
     }
 
     function withdrawFees(address currency) external override onlyRole(ADMIN_ROLE) {
-        uint256 amount = feeBalances[currency];
+        AgentMarketStorage storage $ = _getMarketStorage();
+        uint256 amount = $.feeBalances[currency];
         require(amount > 0, "No fees to withdraw");
+
+        // Update state before external calls (CEI pattern)
+        $.feeBalances[currency] = 0;
 
         if (currency == address(0)) {
             // withdraw 0G
-            _safeTransferNative(admin, amount);
+            _safeTransferNative($.admin, amount);
         } else {
-            // withdraw ERC20 - only update balance after successful transfer
-            IERC20(currency).safeTransfer(admin, amount);
+            // withdraw ERC20
+            IERC20(currency).safeTransfer($.admin, amount);
         }
-        feeBalances[currency] = 0;
 
-        emit FeesWithdrawn(admin, currency, amount);
+        emit FeesWithdrawn($.admin, currency, amount);
     }
 
     // core transaction function
@@ -141,11 +156,13 @@ contract AgentMarket is
         address seller = _validateOrder(order);
         address buyer = _validateOffer(offer, order);
 
+        AgentMarketStorage storage $ = _getMarketStorage();
+
         // 2. transfer iNFT
         if (offer.needProof) {
-            AgentNFT(agentNFT).iTransferFrom(seller, buyer, order.tokenId, proofs);
+            AgentNFT($.agentNFT).iTransferFrom(seller, buyer, order.tokenId, proofs);
         } else {
-            AgentNFT(agentNFT).transferFrom(seller, buyer, order.tokenId);
+            AgentNFT($.agentNFT).transferFrom(seller, buyer, order.tokenId);
         }
 
         // 3. transfer erc20 token or A0GI
@@ -154,8 +171,8 @@ contract AgentMarket is
         }
 
         // 4. mark order and offer as used
-        usedOrders[uint256(order.nonce)] = true;
-        usedOffers[uint256(offer.nonce)] = true;
+        $.usedOrders[uint256(order.nonce)] = true;
+        $.usedOffers[uint256(offer.nonce)] = true;
 
         emit OrderFulfilled(seller, buyer, order.tokenId, offer.offerPrice, order.currency);
     }
@@ -164,22 +181,24 @@ contract AgentMarket is
         require(msg.value > 0, "Must send ETH");
         require(account != address(0), "Invalid address");
         require(!paused(), "Contract is paused");
-        balances[account] += msg.value;
-        emit Deposit(account, balances[account]);
+        AgentMarketStorage storage $ = _getMarketStorage();
+        $.balances[account] += msg.value;
+        emit Deposit(account, $.balances[account]);
     }
 
     function withdraw(address account, uint256 amount) external {
-        require(msg.sender == account || msg.sender == admin, "Only the account or admin can withdraw");
-        require(balances[account] >= amount, "Insufficient balance");
+        AgentMarketStorage storage $ = _getMarketStorage();
+        require(msg.sender == account || msg.sender == $.admin, "Only the account or admin can withdraw");
+        require($.balances[account] >= amount, "Insufficient balance");
         require(account != address(0), "Invalid address");
         require(!paused(), "Contract is paused");
-        balances[account] -= amount;
+        $.balances[account] -= amount;
         _safeTransferNative(account, amount);
         emit Withdraw(account, amount);
     }
 
     function getBalance(address account) external view returns (uint256) {
-        return balances[account];
+        return _getMarketStorage().balances[account];
     }
 
     function _validateOrder(Order calldata order) internal view returns (address) {
@@ -189,9 +208,10 @@ contract AgentMarket is
         require(order.expectedPrice >= 0, "Invalid price");
         // 1.3 verify order nonce is not used
         address seller = _verifyOrderSignature(order);
-        require(!usedOrders[uint256(order.nonce)], "Order already used");
+        AgentMarketStorage storage $ = _getMarketStorage();
+        require(!$.usedOrders[uint256(order.nonce)], "Order already used");
         // 1.4 verify NFT owner is seller
-        address tokenOwner = AgentNFT(agentNFT).ownerOf(order.tokenId);
+        address tokenOwner = AgentNFT($.agentNFT).ownerOf(order.tokenId);
         require(tokenOwner == seller, "NFT owner mismatch");
 
         return seller;
@@ -203,7 +223,8 @@ contract AgentMarket is
         require(offer.tokenId == order.tokenId, "TokenId mismatch");
 
         address buyer = _verifyOfferSignature(offer);
-        require(!usedOffers[uint256(offer.nonce)], "Offer already used");
+        AgentMarketStorage storage $ = _getMarketStorage();
+        require(!$.usedOffers[uint256(offer.nonce)], "Offer already used");
 
         if (order.receiver != address(0)) {
             require(buyer == order.receiver, "Receiver mismatch");
@@ -269,29 +290,33 @@ contract AgentMarket is
     }
 
     function _handlePayment(uint256 offerPrice, address currency, address buyer, address seller) internal {
+        AgentMarketStorage storage $ = _getMarketStorage();
         uint256 totalAmount = offerPrice;
-        uint256 fee = (totalAmount * feeRate) / 10000;
+        uint256 fee = (totalAmount * $.feeRate) / 10000;
         uint256 sellerAmount = totalAmount - fee;
 
-        IERC20 token = IERC20(currency);
         // native token
         if (currency == address(0)) {
-            require(balances[buyer] >= totalAmount, "Insufficient balance");
+            require($.balances[buyer] >= totalAmount, "Insufficient balance");
+            // Update state before external calls (CEI pattern)
+            $.balances[buyer] -= totalAmount;
+            $.feeBalances[currency] += fee;
             _safeTransferNative(seller, sellerAmount);
-            balances[buyer] -= totalAmount;
         } else {
+            // ERC20 token
+            IERC20 token = IERC20(currency);
             token.safeTransferFrom(buyer, seller, sellerAmount);
             token.safeTransferFrom(buyer, address(this), fee);
+            $.feeBalances[currency] += fee;
         }
-        feeBalances[currency] += fee;
     }
 
     function getFeeRate() external view override returns (uint256) {
-        return feeRate;
+        return _getMarketStorage().feeRate;
     }
 
     function getFeeBalance(address currency) external view override returns (uint256) {
-        return feeBalances[currency];
+        return _getMarketStorage().feeBalances[currency];
     }
 
     function _safeTransferNative(address to, uint256 amount) internal {
@@ -305,45 +330,46 @@ contract AgentMarket is
     event MintFeeUpdated(uint256 mintFee);
 
     // for paid mint
-    function setMintFee(uint256 newMintFee) external onlyRole(ADMIN_ROLE) {
-        mintFee = newMintFee;
-        emit MintFeeUpdated(mintFee);
+    function setMintFee(uint256 newMintFee) external onlyRole(OPERATOR_ROLE) {
+        _getMarketStorage().mintFee = newMintFee;
+        emit MintFeeUpdated(_getMarketStorage().mintFee);
     }
 
     event DiscountMintFeeUpdated(uint256 discountMintFee);
 
-    function setDiscountMintFee(uint256 newDiscountMintFee) external onlyRole(ADMIN_ROLE) {
-        discountMintFee = newDiscountMintFee;
-        emit DiscountMintFeeUpdated(discountMintFee);
+    function setDiscountMintFee(uint256 newDiscountMintFee) external onlyRole(OPERATOR_ROLE) {
+        _getMarketStorage().discountMintFee = newDiscountMintFee;
+        emit DiscountMintFeeUpdated(_getMarketStorage().discountMintFee);
     }
 
     function getMintFee() external view returns (uint256) {
-        return mintFee;
+        return _getMarketStorage().mintFee;
     }
 
     function getDiscountMintFee() external view returns (uint256) {
-        return discountMintFee;
+        return _getMarketStorage().discountMintFee;
     }
 
     event PaidMinted(uint256 indexed tokenId, address indexed from, address indexed to, uint256 mintFee);
 
-    function paidMint(IntelligentData[] calldata iDatas, address to, bool isDiscount) external onlyRole(ADMIN_ROLE) {
-        uint256 requiredFee = isDiscount ? discountMintFee : mintFee;
-        require(balances[to] >= requiredFee, "Insufficient balance for mint fee");
+    function paidMint(IntelligentData[] calldata iDatas, address to, bool isDiscount) external onlyRole(MINTER_ROLE) {
+        AgentMarketStorage storage $ = _getMarketStorage();
+        uint256 requiredFee = isDiscount ? $.discountMintFee : $.mintFee;
+        require($.balances[to] >= requiredFee, "Insufficient balance for mint fee");
         require(to != address(0), "Invalid recipient");
         require(!paused(), "Contract is paused");
-        balances[to] -= requiredFee;
-        feeBalances[address(0)] += requiredFee;
-        uint256 tokenId = AgentNFT(agentNFT).mint(iDatas, to);
+        $.balances[to] -= requiredFee;
+        $.feeBalances[address(0)] += requiredFee;
+        uint256 tokenId = AgentNFT($.agentNFT).mintWithRole(iDatas, to);
         emit PaidMinted(tokenId, msg.sender, to, requiredFee);
     }
 
-    function pause() external override onlyRole(PAUSER_ROLE) {
+    function pause() external override onlyRole(OPERATOR_ROLE) {
         _pause();
         emit ContractPaused(msg.sender);
     }
 
-    function unpause() external override onlyRole(PAUSER_ROLE) {
+    function unpause() external override onlyRole(OPERATOR_ROLE) {
         _unpause();
         emit ContractUnpaused(msg.sender);
     }
@@ -351,6 +377,4 @@ contract AgentMarket is
     function isPaused() external view override returns (bool) {
         return paused();
     }
-
-    uint256[50] private __gap;
 }

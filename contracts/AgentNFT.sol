@@ -5,6 +5,7 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
@@ -27,20 +28,23 @@ contract AgentNFT is
     /// @param _newAdmin The new admin
     event AdminChanged(address indexed _oldAdmin, address indexed _newAdmin);
 
-    event Minted(uint256 indexed _tokenId, address indexed _creator, address indexed _owner);
-
     /// @custom:storage-location erc7201:agent.storage.AgentNFT
     struct AgentNFTStorage {
         // Contract metadata
         string storageInfo;
         // Core components
         address admin;
+        // Mint fee
+        uint256 mintFee;
+        // Standard NFT metadata support
+        string baseURI;
+        mapping(uint256 => string) customURIs;
     }
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
-
-    string public constant VERSION = "2.0.0";
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    string public constant VERSION = "1.0.0";
 
     // keccak256(abi.encode(uint(keccak256("agent.storage.AgentNFT")) - 1)) & ~bytes32(uint(0xff))
     bytes32 private constant AGENT_NFT_STORAGE_LOCATION =
@@ -74,7 +78,8 @@ contract AgentNFT is
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin_);
         _grantRole(ADMIN_ROLE, admin_);
-        _grantRole(PAUSER_ROLE, admin_);
+        _grantRole(OPERATOR_ROLE, admin_);
+        _grantRole(MINTER_ROLE, admin_);
 
         AgentNFTStorage storage $ = _getAgentStorage();
         $.storageInfo = storageInfo_;
@@ -96,11 +101,9 @@ contract AgentNFT is
 
             _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
             _grantRole(ADMIN_ROLE, newAdmin);
-            _grantRole(PAUSER_ROLE, newAdmin);
 
             _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
             _revokeRole(ADMIN_ROLE, oldAdmin);
-            _revokeRole(PAUSER_ROLE, oldAdmin);
 
             emit AdminChanged(oldAdmin, newAdmin);
         }
@@ -111,13 +114,24 @@ contract AgentNFT is
         return _getAgentStorage().admin;
     }
 
-    // Admin functions
-    function updateVerifier(address newVerifier) public virtual onlyRole(ADMIN_ROLE) {
+    /// @notice Grant MINTER_ROLE to a trusted contract (e.g., AgentMarket)
+    function grantMinterRole(address minter) external onlyRole(ADMIN_ROLE) {
+        require(minter != address(0), "Invalid minter address");
+        _grantRole(MINTER_ROLE, minter);
+    }
+
+    /// @notice Revoke MINTER_ROLE from an address
+    function revokeMinterRole(address minter) external onlyRole(ADMIN_ROLE) {
+        _revokeRole(MINTER_ROLE, minter);
+    }
+
+    // Operator functions
+    function updateVerifier(address newVerifier) public virtual onlyRole(OPERATOR_ROLE) {
         require(newVerifier != address(0), "Zero address");
         _setVerifier(newVerifier);
     }
 
-    function update(uint256 tokenId, IntelligentData[] calldata newDatas) public virtual {
+    function update(uint256 tokenId, IntelligentData[] calldata newDatas) public virtual whenNotPaused {
         require(_ownerOf(tokenId) == msg.sender, "Not owner");
         require(newDatas.length > 0, "Empty data array");
 
@@ -128,11 +142,69 @@ contract AgentNFT is
         require(to != address(0), "Zero address");
         require(iDatas.length > 0, "Empty data array");
 
+        AgentNFTStorage storage $ = _getAgentStorage();
+        require(msg.value >= $.mintFee, "Insufficient mint fee");
+
         tokenId = _incrementTokenId();
         _safeMint(to, tokenId);
         _updateData(tokenId, iDatas);
+    }
 
-        emit Minted(tokenId, msg.sender, to);
+    /// @notice Mint iNFT with MINTER_ROLE (for AgentMarket contract)
+    /// @dev No fee required - used by trusted contracts like AgentMarket
+    function mintWithRole(
+        IntelligentData[] calldata iDatas,
+        address to
+    ) public virtual onlyRole(MINTER_ROLE) returns (uint256 tokenId) {
+        require(to != address(0), "Zero address");
+        require(iDatas.length > 0, "Empty data array");
+
+        tokenId = _incrementTokenId();
+        _safeMint(to, tokenId);
+        _updateData(tokenId, iDatas);
+    }
+
+    /// @notice Mint standard NFT with MINTER_ROLE (for AgentMarket contract)
+    /// @dev No fee required - used by trusted contracts like AgentMarket
+    function mintWithRole(address to) public virtual onlyRole(MINTER_ROLE) returns (uint256 tokenId) {
+        return mintWithRole(to, "");
+    }
+
+    /// @notice Mint standard NFT with custom URI and MINTER_ROLE (for AgentMarket contract)
+    /// @dev No fee required - used by trusted contracts like AgentMarket
+    function mintWithRole(
+        address to,
+        string memory uri
+    ) public virtual onlyRole(MINTER_ROLE) returns (uint256 tokenId) {
+        require(to != address(0), "Zero address");
+
+        tokenId = _incrementTokenId();
+        _safeMint(to, tokenId);
+
+        if (bytes(uri).length > 0) {
+            AgentNFTStorage storage $ = _getAgentStorage();
+            $.customURIs[tokenId] = uri;
+        }
+    }
+
+    /// @notice Mint a standard NFT (for migration compatibility)
+    function mint(address to) public payable virtual returns (uint256 tokenId) {
+        return mint(to, "");
+    }
+
+    /// @notice Mint a standard NFT with custom URI (for migration compatibility)
+    function mint(address to, string memory uri) public payable virtual returns (uint256 tokenId) {
+        require(to != address(0), "Zero address");
+
+        AgentNFTStorage storage $ = _getAgentStorage();
+        require(msg.value >= $.mintFee, "Insufficient mint fee");
+
+        tokenId = _incrementTokenId();
+        _safeMint(to, tokenId);
+
+        if (bytes(uri).length > 0) {
+            $.customURIs[tokenId] = uri;
+        }
     }
 
     function storageInfo() public view virtual returns (string memory) {
@@ -157,6 +229,76 @@ contract AgentNFT is
     }
 
     event AuthorizedUsersCleared(address indexed owner, uint256 indexed tokenId);
+
+    // Mint fee management
+    event MintFeeUpdated(uint256 oldFee, uint256 newFee);
+
+    function setMintFee(uint256 newMintFee) external onlyRole(OPERATOR_ROLE) {
+        AgentNFTStorage storage $ = _getAgentStorage();
+        uint256 oldFee = $.mintFee;
+        $.mintFee = newMintFee;
+        emit MintFeeUpdated(oldFee, newMintFee);
+    }
+
+    function getMintFee() external view returns (uint256) {
+        return _getAgentStorage().mintFee;
+    }
+
+    function withdrawFees() external onlyRole(ADMIN_ROLE) {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No fees to withdraw");
+
+        address adminAddr = _getAgentStorage().admin;
+        (bool success, ) = payable(adminAddr).call{value: balance}("");
+        require(success, "Transfer failed");
+    }
+
+    // Standard NFT metadata support (ERC721Metadata)
+    function tokenURI(
+        uint256 tokenId
+    ) public view virtual override(ERC721Upgradeable, IERC721Metadata) returns (string memory) {
+        _requireOwned(tokenId);
+
+        AgentNFTStorage storage $ = _getAgentStorage();
+
+        // Priority 1: Custom URI
+        string memory customURI = $.customURIs[tokenId];
+        if (bytes(customURI).length > 0) {
+            return customURI;
+        }
+
+        // Priority 2: baseURI + tokenId
+        string memory base = $.baseURI;
+        if (bytes(base).length > 0) {
+            return string(abi.encodePacked(base, Strings.toString(tokenId)));
+        }
+
+        // Priority 3: Return first dataDescription if it looks like a URI
+        IntelligentData[] memory datas = _intelligentDatasOf(tokenId);
+        if (datas.length > 0 && bytes(datas[0].dataDescription).length > 0) {
+            return datas[0].dataDescription;
+        }
+
+        return "";
+    }
+
+    function setBaseURI(string memory newBaseURI) external onlyRole(OPERATOR_ROLE) {
+        _getAgentStorage().baseURI = newBaseURI;
+    }
+
+    function setTokenURI(uint256 tokenId, string memory newURI) external {
+        require(_ownerOf(tokenId) == msg.sender, "Not owner");
+        _getAgentStorage().customURIs[tokenId] = newURI;
+    }
+
+    // Pausable functions
+    function pause() external onlyRole(OPERATOR_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(OPERATOR_ROLE) {
+        _unpause();
+    }
 
     /*=== override ===*/
     function _update(

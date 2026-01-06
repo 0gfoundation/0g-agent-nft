@@ -40,7 +40,7 @@ contract ERC7857AuthorizeUpgradeable is IERC7857Authorize, ERC7857Upgradeable {
 
         EnumerableSet.AddressSet storage authorizedUsers = $.authorizedUsers[tokenId];
 
-        if (authorizedUsers.length() > MAX_AUTHORIZED_USERS) {
+        if (authorizedUsers.length() >= MAX_AUTHORIZED_USERS) {
             revert ERC7857TooManyAuthorizedUsers();
         }
 
