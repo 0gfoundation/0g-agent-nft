@@ -41,6 +41,9 @@ contract AgentMarket is
         mapping(address => uint256) balances;
         mapping(uint256 => bool) usedOrders;
         mapping(uint256 => bool) usedOffers;
+        // Partner fee distribution
+        mapping(address => uint256) partnerFeeRates; // partner address => fee share rate (in basis points, max 10000)
+        mapping(address => mapping(address => uint256)) partnerFeeBalances; // partner => currency => balance
     }
 
     // keccak256(abi.encode(uint256(keccak256("agent.storage.AgentMarket")) - 1)) & ~bytes32(uint256(0xff))
@@ -114,6 +117,8 @@ contract AgentMarket is
     }
 
     event AgentNFTUpdated(address oldAgentNFT, address newAgentNFT);
+    event PartnerFeeRateUpdated(address indexed partner, uint256 oldRate, uint256 newRate);
+    event PartnerFeesWithdrawn(address indexed partner, address currency, uint256 amount);
 
     function setAgentNFT(address newAgentNFT) external onlyRole(ADMIN_ROLE) {
         require(newAgentNFT != address(0), "Invalid AgentNFT address");
@@ -139,6 +144,60 @@ contract AgentMarket is
         }
 
         emit FeesWithdrawn($.admin, currency, amount);
+    }
+
+    /// @notice Set the partner's share of transaction fees (in basis points, 10000 = 100%)
+    /// @dev The partner receives this percentage of the TOTAL TRANSACTION FEE, not the transaction amount
+    /// @dev Example: feeRate=250 (2.5%), partnerFeeRate=4000 (40%)
+    ///      Transaction 100 -> Fee 2.5 -> Partner gets 1.0, Platform gets 1.5
+    /// @param partner The partner address (creator/collaborator)
+    /// @param feeShareRate The partner's share of fees (0-10000, where 10000 = 100% of fees go to partner)
+    function setPartnerFeeRate(address partner, uint256 feeShareRate) external onlyRole(ADMIN_ROLE) {
+        require(partner != address(0), "Invalid partner address");
+        require(feeShareRate <= 10000, "Fee share rate too high");
+
+        AgentMarketStorage storage $ = _getMarketStorage();
+        uint256 oldRate = $.partnerFeeRates[partner];
+        $.partnerFeeRates[partner] = feeShareRate;
+
+        emit PartnerFeeRateUpdated(partner, oldRate, feeShareRate);
+    }
+
+    /// @notice Get the partner's fee share rate
+    /// @param partner The partner address
+    /// @return The fee share rate in basis points (of the total transaction fee)
+    function getPartnerFeeRate(address partner) external view returns (uint256) {
+        return _getMarketStorage().partnerFeeRates[partner];
+    }
+
+    /// @notice Get the partner's accumulated fee balance for a specific currency
+    /// @param partner The partner address
+    /// @param currency The currency address (address(0) for native token)
+    /// @return The partner's fee balance
+    function getPartnerFeeBalance(address partner, address currency) external view returns (uint256) {
+        return _getMarketStorage().partnerFeeBalances[partner][currency];
+    }
+
+    /// @notice Withdraw partner fees
+    /// @dev Partners can withdraw their own fees
+    /// @param currency The currency to withdraw (address(0) for native token)
+    function withdrawPartnerFees(address currency) external nonReentrant {
+        AgentMarketStorage storage $ = _getMarketStorage();
+        uint256 amount = $.partnerFeeBalances[msg.sender][currency];
+        require(amount > 0, "No fees to withdraw");
+
+        // Update state before external calls (CEI pattern)
+        $.partnerFeeBalances[msg.sender][currency] = 0;
+
+        if (currency == address(0)) {
+            // withdraw native token
+            _safeTransferNative(msg.sender, amount);
+        } else {
+            // withdraw ERC20
+            IERC20(currency).safeTransfer(msg.sender, amount);
+        }
+
+        emit PartnerFeesWithdrawn(msg.sender, currency, amount);
     }
 
     // core transaction function
@@ -167,7 +226,7 @@ contract AgentMarket is
 
         // 3. transfer erc20 token or A0GI
         if (offer.offerPrice > 0) {
-            _handlePayment(offer.offerPrice, order.currency, buyer, seller);
+            _handlePayment(offer.offerPrice, order.currency, buyer, seller, order.tokenId);
         }
 
         // 4. mark order and offer as used
@@ -289,25 +348,45 @@ contract AgentMarket is
             );
     }
 
-    function _handlePayment(uint256 offerPrice, address currency, address buyer, address seller) internal {
+    function _handlePayment(uint256 offerPrice, address currency, address buyer, address seller, uint256 tokenId) internal {
         AgentMarketStorage storage $ = _getMarketStorage();
         uint256 totalAmount = offerPrice;
-        uint256 fee = (totalAmount * $.feeRate) / 10000;
-        uint256 sellerAmount = totalAmount - fee;
+        uint256 totalFee = (totalAmount * $.feeRate) / 10000;
+        uint256 sellerAmount = totalAmount - totalFee;
+
+        // Check if this NFT has a creator/partner for fee distribution
+        address creator = AgentNFT($.agentNFT).creatorOf(tokenId);
+        uint256 partnerFee = 0;
+        uint256 platformFee = totalFee;
+
+        if (creator != address(0)) {
+            uint256 partnerFeeRate = $.partnerFeeRates[creator];
+            if (partnerFeeRate > 0) {
+                // Split the fee between partner and platform
+                partnerFee = (totalFee * partnerFeeRate) / 10000;
+                platformFee = totalFee - partnerFee;
+            }
+        }
 
         // native token
         if (currency == address(0)) {
             require($.balances[buyer] >= totalAmount, "Insufficient balance");
             // Update state before external calls (CEI pattern)
             $.balances[buyer] -= totalAmount;
-            $.feeBalances[currency] += fee;
+            $.feeBalances[currency] += platformFee;
+            if (partnerFee > 0) {
+                $.partnerFeeBalances[creator][currency] += partnerFee;
+            }
             _safeTransferNative(seller, sellerAmount);
         } else {
             // ERC20 token
             IERC20 token = IERC20(currency);
             token.safeTransferFrom(buyer, seller, sellerAmount);
-            token.safeTransferFrom(buyer, address(this), fee);
-            $.feeBalances[currency] += fee;
+            token.safeTransferFrom(buyer, address(this), totalFee);
+            $.feeBalances[currency] += platformFee;
+            if (partnerFee > 0) {
+                $.partnerFeeBalances[creator][currency] += partnerFee;
+            }
         }
     }
 

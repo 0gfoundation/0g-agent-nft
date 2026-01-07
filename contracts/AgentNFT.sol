@@ -28,6 +28,11 @@ contract AgentNFT is
     /// @param _newAdmin The new admin
     event AdminChanged(address indexed _oldAdmin, address indexed _newAdmin);
 
+    /// @notice The event emitted when a creator is set for a token
+    /// @param tokenId The token ID
+    /// @param creator The creator address
+    event CreatorSet(uint256 indexed tokenId, address indexed creator);
+
     /// @custom:storage-location erc7201:agent.storage.AgentNFT
     struct AgentNFTStorage {
         // Contract metadata
@@ -39,6 +44,8 @@ contract AgentNFT is
         // Standard NFT metadata support
         string baseURI;
         mapping(uint256 => string) customURIs;
+        // Creator/Partner tracking for fee distribution
+        mapping(uint256 => address) creators;
     }
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -187,6 +194,49 @@ contract AgentNFT is
         }
     }
 
+    /// @notice Mint iNFT with creator tracking (for fee distribution)
+    /// @dev No fee required - used by AgentMarket for partner NFTs
+    function mintWithRole(
+        IntelligentData[] calldata iDatas,
+        address to,
+        address creator
+    ) public virtual onlyRole(MINTER_ROLE) returns (uint256 tokenId) {
+        require(to != address(0), "Zero address");
+        require(iDatas.length > 0, "Empty data array");
+
+        tokenId = _incrementTokenId();
+        _safeMint(to, tokenId);
+        _updateData(tokenId, iDatas);
+
+        if (creator != address(0)) {
+            AgentNFTStorage storage $ = _getAgentStorage();
+            $.creators[tokenId] = creator;
+            emit CreatorSet(tokenId, creator);
+        }
+    }
+
+    /// @notice Mint standard NFT with creator tracking (for fee distribution)
+    /// @dev No fee required - used by AgentMarket for partner NFTs
+    function mintWithRole(
+        address to,
+        string memory uri,
+        address creator
+    ) public virtual onlyRole(MINTER_ROLE) returns (uint256 tokenId) {
+        require(to != address(0), "Zero address");
+
+        tokenId = _incrementTokenId();
+        _safeMint(to, tokenId);
+
+        AgentNFTStorage storage $ = _getAgentStorage();
+        if (bytes(uri).length > 0) {
+            $.customURIs[tokenId] = uri;
+        }
+        if (creator != address(0)) {
+            $.creators[tokenId] = creator;
+            emit CreatorSet(tokenId, creator);
+        }
+    }
+
     /// @notice Mint a standard NFT (for migration compatibility)
     function mint(address to) public payable virtual returns (uint256 tokenId) {
         return mint(to, "");
@@ -289,6 +339,22 @@ contract AgentNFT is
     function setTokenURI(uint256 tokenId, string memory newURI) external {
         require(_ownerOf(tokenId) == msg.sender, "Not owner");
         _getAgentStorage().customURIs[tokenId] = newURI;
+    }
+
+    /// @notice Get the creator of a token
+    /// @param tokenId The token ID
+    /// @return The creator address
+    function creatorOf(uint256 tokenId) public view virtual returns (address) {
+        return _getAgentStorage().creators[tokenId];
+    }
+
+    /// @notice Set the creator of a token (only OPERATOR_ROLE)
+    /// @param tokenId The token ID
+    /// @param creator The creator address
+    function setCreator(uint256 tokenId, address creator) external onlyRole(OPERATOR_ROLE) {
+        require(_ownerOf(tokenId) != address(0), "Token does not exist");
+        _getAgentStorage().creators[tokenId] = creator;
+        emit CreatorSet(tokenId, creator);
     }
 
     // Pausable functions
