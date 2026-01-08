@@ -15,9 +15,6 @@ const ZG_TESTNET_CHAIN_ID = process.env.ZG_TESTNET_CHAIN_ID;
 const ZG_MAINNET_CHAIN_ID = process.env.ZG_MAINNET_CHAIN_ID;
 const ZG_TESTNET_PRIVATE_KEY = process.env.ZG_TESTNET_PRIVATE_KEY;
 const ZG_MAINNET_PRIVATE_KEY = process.env.ZG_MAINNET_PRIVATE_KEY;
-const ZG_AGENT_NFT_CREATOR_PRIVATE_KEY = process.env.ZG_AGENT_NFT_CREATOR_PRIVATE_KEY;
-const ZG_AGENT_NFT_ALICE_PRIVATE_KEY = process.env.ZG_AGENT_NFT_ALICE_PRIVATE_KEY;
-const ZG_AGENT_NFT_BOB_PRIVATE_KEY = process.env.ZG_AGENT_NFT_BOB_PRIVATE_KEY;
 const ZG_TESTNET_ETHERSCAN_BROWSER_URL = process.env.ZG_TESTNET_ETHERSCAN_BROWSER_URL;
 const ZG_TESTNET_ETHERSCAN_API_URL = process.env.ZG_TESTNET_ETHERSCAN_API_URL;
 const ZG_MAINNET_ETHERSCAN_BROWSER_URL = process.env.ZG_MAINNET_ETHERSCAN_BROWSER_URL;
@@ -48,20 +45,6 @@ const config: HardhatUserConfig = {
       allowBlocksWithSameTimestamp: true,
       blockGasLimit: 100000000,
       gas: 100000000,
-      accounts: [
-        {
-          privateKey: ZG_AGENT_NFT_CREATOR_PRIVATE_KEY || "",
-          balance: "1000000000000000000000",
-        },
-        {
-          privateKey: ZG_AGENT_NFT_ALICE_PRIVATE_KEY || "",
-          balance: "1000000000000000000000",
-        },
-        {
-          privateKey: ZG_AGENT_NFT_BOB_PRIVATE_KEY || "",
-          balance: "1000000000000000000000",
-        }
-      ],
       live: false,
       saveDeployments: true,
       tags: ["test", "local"]
