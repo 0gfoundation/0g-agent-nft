@@ -224,7 +224,7 @@ contract AgentMarket is
             AgentNFT($.agentNFT).transferFrom(seller, buyer, order.tokenId);
         }
 
-        // 3. transfer erc20 token or A0GI
+        // 3. transfer erc20 token or 0G
         if (offer.offerPrice > 0) {
             _handlePayment(offer.offerPrice, order.currency, buyer, seller, order.tokenId);
         }
@@ -348,7 +348,13 @@ contract AgentMarket is
             );
     }
 
-    function _handlePayment(uint256 offerPrice, address currency, address buyer, address seller, uint256 tokenId) internal {
+    function _handlePayment(
+        uint256 offerPrice,
+        address currency,
+        address buyer,
+        address seller,
+        uint256 tokenId
+    ) internal {
         AgentMarketStorage storage $ = _getMarketStorage();
         uint256 totalAmount = offerPrice;
         uint256 totalFee = (totalAmount * $.feeRate) / 10000;
@@ -408,7 +414,6 @@ contract AgentMarket is
 
     event MintFeeUpdated(uint256 mintFee);
 
-    // for paid mint
     function setMintFee(uint256 newMintFee) external onlyRole(OPERATOR_ROLE) {
         _getMarketStorage().mintFee = newMintFee;
         emit MintFeeUpdated(_getMarketStorage().mintFee);
@@ -441,6 +446,35 @@ contract AgentMarket is
         $.feeBalances[address(0)] += requiredFee;
         uint256 tokenId = AgentNFT($.agentNFT).mintWithRole(iDatas, to);
         emit PaidMinted(tokenId, msg.sender, to, requiredFee);
+    }
+
+    function paidMint(address to, string memory uri, address creator, bool isDiscount) external onlyRole(MINTER_ROLE) {
+        AgentMarketStorage storage $ = _getMarketStorage();
+        uint256 requiredFee = isDiscount ? $.discountMintFee : $.mintFee;
+        require($.balances[to] >= requiredFee, "Insufficient balance for mint fee");
+        require(to != address(0), "Invalid recipient");
+        require(!paused(), "Contract is paused");
+        $.balances[to] -= requiredFee;
+        $.feeBalances[address(0)] += requiredFee;
+        uint256 tokenId = AgentNFT($.agentNFT).mintWithRole(to, uri, creator);
+        emit PaidMinted(tokenId, creator, to, requiredFee);
+    }
+
+    function mint(
+        IntelligentData[] calldata iDatas,
+        address to,
+        address creator,
+        bool isDiscount
+    ) external onlyRole(MINTER_ROLE) {
+        AgentMarketStorage storage $ = _getMarketStorage();
+        uint256 requiredFee = isDiscount ? $.discountMintFee : $.mintFee;
+        require($.balances[to] >= requiredFee, "Insufficient balance for mint fee");
+        require(to != address(0), "Invalid recipient");
+        require(!paused(), "Contract is paused");
+        $.balances[to] -= requiredFee;
+        $.feeBalances[address(0)] += requiredFee;
+        uint256 tokenId = AgentNFT($.agentNFT).mintWithRole(iDatas, to, creator);
+        emit PaidMinted(tokenId, creator, to, requiredFee);
     }
 
     function pause() external override onlyRole(OPERATOR_ROLE) {
