@@ -30,15 +30,25 @@ contract Verifier is
     event AttestationContractUpdated(AttestationConfig[] attestationConfigs);
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    string public constant VERSION = "1.0.0";
 
-    mapping(OracleType => address) public attestationContract;
+    /// @custom:storage-location erc7201:0g.storage.Verifier
+    struct VerifierStorage {
+        address admin;
+        mapping(OracleType => address) attestationContract;
+        uint256 maxProofAge;
+    }
 
-    uint256 public maxProofAge;
+    // keccak256(abi.encode(uint256(keccak256("0g.storage.Verifier")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant VERIFIER_STORAGE_LOCATION =
+        0xbecdd708b48a40f3aa8e2248844b430477e64ef60f94c9d0bf26b790ba82a300;
 
-    address public admin;
-
-    string public constant VERSION = "2.0.0";
+    function _getVerifierStorage() private pure returns (VerifierStorage storage $) {
+        assembly {
+            $.slot := VERIFIER_STORAGE_LOCATION
+        }
+    }
 
     event AdminChanged(address indexed oldAdmin, address indexed newAdmin);
 
@@ -47,78 +57,71 @@ contract Verifier is
         _disableInitializers();
     }
 
-    function initialize(
-        AttestationConfig[] calldata _attestationConfigs,
-        address _admin
-    ) external initializer {
+    function initialize(AttestationConfig[] calldata _attestationConfigs, address _admin) external initializer {
         require(_admin != address(0), "Invalid admin address");
-        
+
         __AccessControl_init();
         __Pausable_init();
         __ReentrancyGuard_init();
 
+        VerifierStorage storage $ = _getVerifierStorage();
         for (uint256 i = 0; i < _attestationConfigs.length; i++) {
-            attestationContract[
-                _attestationConfigs[i].oracleType
-            ] = _attestationConfigs[i].contractAddress;
+            $.attestationContract[_attestationConfigs[i].oracleType] = _attestationConfigs[i].contractAddress;
         }
-        maxProofAge = 7 days;
+        $.maxProofAge = 7 days;
 
         // Set admin state variable
-        admin = _admin;
-        
+        $.admin = _admin;
+
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(ADMIN_ROLE, _admin);
-        _grantRole(PAUSER_ROLE, _admin);
+        _grantRole(OPERATOR_ROLE, _admin);
 
         emit AttestationContractUpdated(_attestationConfigs);
     }
 
     function setAdmin(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newAdmin != address(0), "Invalid admin address");
-        address oldAdmin = admin;
+        VerifierStorage storage $ = _getVerifierStorage();
+        address oldAdmin = $.admin;
 
         if (oldAdmin != newAdmin) {
-            admin = newAdmin;
+            $.admin = newAdmin;
 
             _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
             _grantRole(ADMIN_ROLE, newAdmin);
-            _grantRole(PAUSER_ROLE, newAdmin);
+            _grantRole(OPERATOR_ROLE, newAdmin);
 
             // Only revoke if oldAdmin is not address(0)
             if (oldAdmin != address(0)) {
                 _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
                 _revokeRole(ADMIN_ROLE, oldAdmin);
-                _revokeRole(PAUSER_ROLE, oldAdmin);
+                _revokeRole(OPERATOR_ROLE, oldAdmin);
             }
 
             emit AdminChanged(oldAdmin, newAdmin);
         }
     }
 
-    function updateAttestationContract(
-        AttestationConfig[] calldata _attestationConfigs
-    ) external onlyRole(ADMIN_ROLE) {
+    function updateAttestationContract(AttestationConfig[] calldata _attestationConfigs) external onlyRole(ADMIN_ROLE) {
+        VerifierStorage storage $ = _getVerifierStorage();
         for (uint256 i = 0; i < _attestationConfigs.length; i++) {
-            attestationContract[
-                _attestationConfigs[i].oracleType
-            ] = _attestationConfigs[i].contractAddress;
+            $.attestationContract[_attestationConfigs[i].oracleType] = _attestationConfigs[i].contractAddress;
         }
 
         emit AttestationContractUpdated(_attestationConfigs);
     }
 
-    function updateMaxProofAge(
-        uint256 _maxProofAge
-    ) external onlyRole(ADMIN_ROLE) {
-        maxProofAge = _maxProofAge;
+    function updateMaxProofAge(uint256 _maxProofAge) external onlyRole(ADMIN_ROLE) {
+        VerifierStorage storage $ = _getVerifierStorage();
+        $.maxProofAge = _maxProofAge;
     }
 
-    function pause() external onlyRole(PAUSER_ROLE) {
+    function pause() external onlyRole(OPERATOR_ROLE) {
         _pause();
     }
 
-    function unpause() external onlyRole(PAUSER_ROLE) {
+    function unpause() external onlyRole(OPERATOR_ROLE) {
         _unpause();
     }
 
@@ -126,36 +129,21 @@ contract Verifier is
         return keccak256(abi.encode(nonce, msg.sender));
     }
 
-    function teeOracleVerify(
-        bytes32 messageHash,
-        bytes memory signature
-    ) internal view returns (bool) {
-        return
-            TEEVerifier(attestationContract[OracleType.TEE]).verifyTEESignature(
-                messageHash,
-                signature
-            );
+    function teeOracleVerify(bytes32 messageHash, bytes memory signature) internal view returns (bool) {
+        VerifierStorage storage $ = _getVerifierStorage();
+        return TEEVerifier($.attestationContract[OracleType.TEE]).verifyTEESignature(messageHash, signature);
     }
 
     /// @notice Extract and verify signature from the access proof
     /// @param accessProof The access proof
     /// @return The recovered access assistant address
-    function verifyAccessibility(
-        AccessProof memory accessProof
-    ) private pure returns (address) {
+    function verifyAccessibility(AccessProof memory accessProof) private pure returns (address) {
         bytes32 messageHash = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n66",
                 Strings.toHexString(
                     uint256(
-                        keccak256(
-                            abi.encodePacked(
-                                accessProof.oldDataHash,
-                                accessProof.newDataHash,
-                                accessProof.encryptedPubKey,
-                                accessProof.nonce
-                            )
-                        )
+                        keccak256(abi.encodePacked(accessProof.dataHash, accessProof.targetPubkey, accessProof.nonce))
                     ),
                     32
                 )
@@ -167,9 +155,7 @@ contract Verifier is
         return accessAssistant;
     }
 
-    function verfifyOwnershipProof(
-        OwnershipProof memory ownershipProof
-    ) private view returns (bool) {
+    function verifyOwnershipProof(OwnershipProof memory ownershipProof) private view returns (bool) {
         if (ownershipProof.oracleType == OracleType.TEE) {
             bytes32 messageHash = keccak256(
                 abi.encodePacked(
@@ -178,10 +164,9 @@ contract Verifier is
                         uint256(
                             keccak256(
                                 abi.encodePacked(
-                                    ownershipProof.oldDataHash,
-                                    ownershipProof.newDataHash,
+                                    ownershipProof.dataHash,
                                     ownershipProof.sealedKey,
-                                    ownershipProof.encryptedPubKey,
+                                    ownershipProof.targetPubkey,
                                     ownershipProof.nonce
                                 )
                             )
@@ -206,56 +191,38 @@ contract Verifier is
         TransferValidityProof calldata proof
     ) private view returns (TransferValidityProofOutput memory output) {
         // compare the proof data in access proof and ownership proof
-        require(
-            proof.accessProof.oldDataHash == proof.ownershipProof.oldDataHash,
-            "Invalid oldDataHashes"
-        );
-        output.oldDataHash = proof.accessProof.oldDataHash;
-        require(
-            proof.accessProof.newDataHash == proof.ownershipProof.newDataHash,
-            "Invalid newDataHashes"
-        );
-        output.newDataHash = proof.accessProof.newDataHash;
+        require(proof.accessProof.dataHash == proof.ownershipProof.dataHash, "Invalid dataHash");
+        output.dataHash = proof.accessProof.dataHash;
 
-        output.wantedKey = proof.accessProof.encryptedPubKey;
+        output.wantedKey = proof.accessProof.targetPubkey;
         output.accessProofNonce = proof.accessProof.nonce;
-        output.encryptedPubKey = proof.ownershipProof.encryptedPubKey;
+        output.targetPubkey = proof.ownershipProof.targetPubkey;
         output.sealedKey = proof.ownershipProof.sealedKey;
         output.ownershipProofNonce = proof.ownershipProof.nonce;
 
         // verify the access assistant
         output.accessAssistant = verifyAccessibility(proof.accessProof);
 
-        bool isOwn = verfifyOwnershipProof(proof.ownershipProof);
+        bool isValid = verifyOwnershipProof(proof.ownershipProof);
 
-        require(isOwn, "Invalid ownership proof");
+        require(isValid, "Invalid ownership proof");
 
         return output;
     }
 
-    /// @notice Verify data transfer validity, the _proof prove:
-    ///         1. The pre-image of oldDataHashes
-    ///         2. The oldKey can decrypt the pre-image and the new key re-encrypt the plaintexts to new ciphertexts
-    ///         3. The newKey is encrypted with the receiver's pubKey to get the sealedKey
-    ///         4. The hashes of new ciphertexts is newDataHashes (key to note: TEE could support a private key of the receiver)
-    ///         5. The newDataHashes identified ciphertexts are available in the storage: need the signature from the receiver signing oldDataHashes and newDataHashes
-    /// @param proofs Proof generated by TEE/ZKP oracle
+    /// @notice Verify data transfer validity, the proofs prove:
+    ///         1. The dataHash identified data is available to the target receiver
+    ///         2. The dataHash identified data is owned by the sender
+    ///         3. The dataHash identified data is decrypted by the data key, and the decrypted plaintext is good
+    ///         4. The data key which is used to encrypt the dataHash identified data is delivered to the target receiver
+    /// @param proofs Proof generated by TEE/ZKP
     function verifyTransferValidity(
         TransferValidityProof[] calldata proofs
-    )
-        public
-        virtual
-        override
-        whenNotPaused
-        returns (TransferValidityProofOutput[] memory)
-    {
-        TransferValidityProofOutput[]
-            memory outputs = new TransferValidityProofOutput[](proofs.length);
+    ) public virtual override whenNotPaused returns (TransferValidityProofOutput[] memory) {
+        TransferValidityProofOutput[] memory outputs = new TransferValidityProofOutput[](proofs.length);
 
         for (uint256 i = 0; i < proofs.length; i++) {
-            TransferValidityProofOutput memory output = processTransferProof(
-                proofs[i]
-            );
+            TransferValidityProofOutput memory output = processTransferProof(proofs[i]);
 
             outputs[i] = output;
 
@@ -269,5 +236,15 @@ contract Verifier is
         return outputs;
     }
 
-    uint256[50] private __gap;
+    function admin() public view returns (address) {
+        return _getVerifierStorage().admin;
+    }
+
+    function attestationContract(OracleType oracleType) public view returns (address) {
+        return _getVerifierStorage().attestationContract[oracleType];
+    }
+
+    function maxProofAge() public view returns (uint256) {
+        return _getVerifierStorage().maxProofAge;
+    }
 }

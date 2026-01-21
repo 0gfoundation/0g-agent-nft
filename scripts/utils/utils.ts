@@ -21,7 +21,7 @@ const UPGRADEABLE_BEACON = "UpgradeableBeacon";
 const BEACON_PROXY = "BeaconProxy";
 export const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
 export const ADMIN_ROLE = ethers.id("ADMIN_ROLE");
-export const PAUSER_ROLE = ethers.id("PAUSER_ROLE");
+export const OPERATOR_ROLE = ethers.id("OPERATOR_ROLE");
 export const UNFROZEN_ROLE = ethers.id("UNFROZEN_ROLE");
 
 interface TypechainFactory<T> {

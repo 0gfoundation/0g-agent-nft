@@ -11,7 +11,8 @@
     "coverage": "hardhat coverage",
     "upgrade": "hardhat run scripts/upgrade.ts --network",
     "clean-stuck-tx": "ts-node scripts/clean_stuck_tx.ts",
-    "generate-external-types": "npx typechain --target=ethers-v6 --out-dir=external-types/contracts ./build/artifacts/contracts/AgentNFT.sol/AgentNFT.json ./build/artifacts/contracts/AgentMarket.sol/AgentMarket.json"
+    "generate-external-types": "npx typechain --target=ethers-v6 --out-dir=external-types/contracts ./build/artifacts/contracts/AgentNFT.sol/AgentNFT.json ./build/artifacts/contracts/AgentMarket.sol/AgentMarket.json",
+    "fmt:sol": "prettier 'contracts/**/*.sol' -w"
   },
   "keywords": [],
   "author": "wei <wei.wu.life@gmail.com>",
@@ -23,6 +24,7 @@
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.12",
     "@openzeppelin/contracts": "5.0.2",
+    "@openzeppelin/contracts-upgradeable": "5.0.2",
     "@typechain/ethers-v6": "^0.5.1",
     "@typechain/hardhat": "^9.1.0",
     "@types/chai": "^5.0.1",
@@ -37,11 +39,13 @@
     "hardhat-gas-reporter": "^2.2.2",
     "solidity-coverage": "^0.8.14",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2",
-    "@openzeppelin/contracts-upgradeable": "5.0.2"
+    "typescript": "^5.7.2"
   },
   "repository": "https://github.com/0glabs/0g-agent-nft.git",
   "dependencies": {
+    "prettier": "2.8.4",
+    "prettier-plugin-organize-imports": "3.2.4",
+    "prettier-plugin-solidity": "1.1.2",
     "typechain": "^8.3.0"
   }
 }
