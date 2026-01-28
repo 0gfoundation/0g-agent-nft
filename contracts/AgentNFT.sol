@@ -138,14 +138,22 @@ contract AgentNFT is
         _setVerifier(newVerifier);
     }
 
-    function update(uint256 tokenId, IntelligentData[] calldata newDatas) public virtual whenNotPaused {
+    function update(
+        uint256 tokenId,
+        IntelligentData[] calldata newDatas,
+        bytes[] memory sealedKeys
+    ) public virtual whenNotPaused {
         require(_ownerOf(tokenId) == msg.sender, "Not owner");
         require(newDatas.length > 0, "Empty data array");
 
-        _updateData(tokenId, newDatas);
+        _updateData(tokenId, newDatas, sealedKeys);
     }
 
-    function mint(IntelligentData[] calldata iDatas, address to) public payable virtual returns (uint256 tokenId) {
+    function mint(
+        IntelligentData[] calldata iDatas,
+        address to,
+        bytes[] memory sealedKeys
+    ) public payable virtual returns (uint256 tokenId) {
         require(to != address(0), "Zero address");
         require(iDatas.length > 0, "Empty data array");
 
@@ -154,21 +162,22 @@ contract AgentNFT is
 
         tokenId = _incrementTokenId();
         _safeMint(to, tokenId);
-        _updateData(tokenId, iDatas);
+        _updateData(tokenId, iDatas, sealedKeys);
     }
 
     /// @notice Mint iNFT with MINTER_ROLE (for AgentMarket contract)
     /// @dev No fee required - used by trusted contracts like AgentMarket
     function mintWithRole(
         IntelligentData[] calldata iDatas,
-        address to
+        address to,
+        bytes[] memory sealedKeys
     ) public virtual onlyRole(MINTER_ROLE) returns (uint256 tokenId) {
         require(to != address(0), "Zero address");
         require(iDatas.length > 0, "Empty data array");
 
         tokenId = _incrementTokenId();
         _safeMint(to, tokenId);
-        _updateData(tokenId, iDatas);
+        _updateData(tokenId, iDatas, sealedKeys);
     }
 
     /// @notice Mint standard NFT with MINTER_ROLE (for AgentMarket contract)
@@ -199,14 +208,15 @@ contract AgentNFT is
     function mintWithRole(
         IntelligentData[] calldata iDatas,
         address to,
-        address creator
+        address creator,
+        bytes[] memory sealedKeys
     ) public virtual onlyRole(MINTER_ROLE) returns (uint256 tokenId) {
         require(to != address(0), "Zero address");
         require(iDatas.length > 0, "Empty data array");
 
         tokenId = _incrementTokenId();
         _safeMint(to, tokenId);
-        _updateData(tokenId, iDatas);
+        _updateData(tokenId, iDatas, sealedKeys);
 
         if (creator != address(0)) {
             AgentNFTStorage storage $ = _getAgentStorage();
@@ -379,9 +389,10 @@ contract AgentNFT is
 
     function _updateData(
         uint256 tokenId,
-        IntelligentData[] memory newDatas
+        IntelligentData[] memory newDatas,
+        bytes[] memory sealedKeys
     ) internal override(ERC7857IDataStorageUpgradeable, ERC7857Upgradeable) {
-        ERC7857IDataStorageUpgradeable._updateData(tokenId, newDatas);
+        ERC7857IDataStorageUpgradeable._updateData(tokenId, newDatas, sealedKeys);
     }
 
     function _intelligentDatasOf(
