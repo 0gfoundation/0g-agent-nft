@@ -2,8 +2,11 @@
 pragma solidity ^0.8.20;
 
 import "./interfaces/IAgentMarket.sol";
+import "./interfaces/IERC7857.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -44,6 +47,8 @@ contract AgentMarket is
         // Partner fee distribution
         mapping(address => uint256) partnerFeeRates; // partner address => fee share rate (in basis points, max 10000)
         mapping(address => mapping(address => uint256)) partnerFeeBalances; // partner => currency => balance
+        // Supported NFT contracts whitelist
+        mapping(address => bool) supportedNFTs; // NFT contract address => supported status
     }
 
     // keccak256(abi.encode(uint256(keccak256("agent.storage.AgentMarket")) - 1)) & ~bytes32(uint256(0xff))
@@ -119,12 +124,48 @@ contract AgentMarket is
     event AgentNFTUpdated(address oldAgentNFT, address newAgentNFT);
     event PartnerFeeRateUpdated(address indexed partner, uint256 oldRate, uint256 newRate);
     event PartnerFeesWithdrawn(address indexed partner, address currency, uint256 amount);
+    event NFTSupportAdded(address indexed nftContract);
+    event NFTSupportRemoved(address indexed nftContract);
 
     function setAgentNFT(address newAgentNFT) external onlyRole(ADMIN_ROLE) {
         require(newAgentNFT != address(0), "Invalid AgentNFT address");
         address oldAgentNFT = _getMarketStorage().agentNFT;
         _getMarketStorage().agentNFT = newAgentNFT;
         emit AgentNFTUpdated(oldAgentNFT, newAgentNFT);
+    }
+
+    /// @notice Add an external NFT contract to the whitelist
+    /// @param nftContract The NFT contract address to support
+    function addSupportedNFT(address nftContract) external onlyRole(ADMIN_ROLE) {
+        require(nftContract != address(0), "Invalid NFT contract address");
+        AgentMarketStorage storage $ = _getMarketStorage();
+        require(!$.supportedNFTs[nftContract], "NFT already supported");
+        $.supportedNFTs[nftContract] = true;
+        emit NFTSupportAdded(nftContract);
+    }
+
+    /// @notice Remove an external NFT contract from the whitelist
+    /// @param nftContract The NFT contract address to remove
+    function removeSupportedNFT(address nftContract) external onlyRole(ADMIN_ROLE) {
+        require(nftContract != address(0), "Invalid NFT contract address");
+        AgentMarketStorage storage $ = _getMarketStorage();
+        require(nftContract != $.agentNFT, "Cannot remove internal agentNFT");
+        require($.supportedNFTs[nftContract], "NFT not supported");
+        $.supportedNFTs[nftContract] = false;
+        emit NFTSupportRemoved(nftContract);
+    }
+
+    /// @notice Check if an NFT contract is supported
+    /// @param nftContract The NFT contract address to check
+    /// @return True if supported (either internal agentNFT or whitelisted)
+    function isSupportedNFT(address nftContract) external view returns (bool) {
+        AgentMarketStorage storage $ = _getMarketStorage();
+        // Internal agentNFT is always supported
+        if (nftContract == $.agentNFT) {
+            return true;
+        }
+        // Check whitelist for external contracts
+        return $.supportedNFTs[nftContract];
     }
 
     function withdrawFees(address currency) external override onlyRole(ADMIN_ROLE) {
@@ -206,30 +247,35 @@ contract AgentMarket is
         Offer calldata offer,
         TransferValidityProof[] calldata proofs
     ) external payable override nonReentrant whenNotPaused {
-        // 1. verify order and offer:
-        // 1.1 verify signature
-        // 1.2 verify expiration
-        // 1.3 verify nonce is not used
-        // 1.4 verify NFT owner is seller
-        // 1.5 verify offerPrice >= expectedPrice
-        address seller = _validateOrder(order);
+        // 1. resolve and validate NFT contract
+        address nftContract = _resolveAndValidateNFT(order.nftContract);
+        require(nftContract == _resolveAndValidateNFT(offer.nftContract), "NFT contract mismatch");
+
+        // 2. verify order and offer:
+        // 2.1 verify signature
+        // 2.2 verify expiration
+        // 2.3 verify nonce is not used
+        // 2.4 verify NFT owner is seller
+        // 2.5 verify offerPrice >= expectedPrice
+        address seller = _validateOrder(order, nftContract);
         address buyer = _validateOffer(offer, order);
 
         AgentMarketStorage storage $ = _getMarketStorage();
 
-        // 2. transfer iNFT
+        // 3. transfer iNFT
         if (offer.needProof) {
-            AgentNFT($.agentNFT).iTransferFrom(seller, buyer, order.tokenId, proofs);
+            AgentNFT(nftContract).iTransferFrom(seller, buyer, order.tokenId, proofs);
         } else {
-            AgentNFT($.agentNFT).transferFrom(seller, buyer, order.tokenId);
+            // Standard transferFrom (IERC721)
+            IERC721(nftContract).transferFrom(seller, buyer, order.tokenId);
         }
 
-        // 3. transfer erc20 token or 0G
+        // 4. transfer erc20 token or 0G
         if (offer.offerPrice > 0) {
-            _handlePayment(offer.offerPrice, order.currency, buyer, seller, order.tokenId);
+            _handlePayment(offer.offerPrice, order.currency, buyer, seller, order.tokenId, nftContract);
         }
 
-        // 4. mark order and offer as used
+        // 5. mark order and offer as used
         $.usedOrders[uint256(order.nonce)] = true;
         $.usedOffers[uint256(offer.nonce)] = true;
 
@@ -260,7 +306,23 @@ contract AgentMarket is
         return _getMarketStorage().balances[account];
     }
 
-    function _validateOrder(Order calldata order) internal view returns (address) {
+    /// @notice Resolve and validate NFT contract address
+    /// @param nftContract The NFT contract address (address(0) means default agentNFT)
+    /// @return The resolved NFT contract address
+    function _resolveAndValidateNFT(address nftContract) internal view returns (address) {
+        AgentMarketStorage storage $ = _getMarketStorage();
+
+        // address(0) or agentNFT -> return agentNFT (internal contract, always allowed)
+        if (nftContract == address(0) || nftContract == $.agentNFT) {
+            return $.agentNFT;
+        }
+
+        // External contracts: check whitelist
+        require($.supportedNFTs[nftContract], "NFT contract not supported");
+        return nftContract;
+    }
+
+    function _validateOrder(Order calldata order, address nftContract) internal view returns (address) {
         // 1.1 verify expiration
         require(block.timestamp <= order.expireTime, "Order expired");
         // 1.2 verify price
@@ -270,7 +332,7 @@ contract AgentMarket is
         AgentMarketStorage storage $ = _getMarketStorage();
         require(!$.usedOrders[uint256(order.nonce)], "Order already used");
         // 1.4 verify NFT owner is seller
-        address tokenOwner = AgentNFT($.agentNFT).ownerOf(order.tokenId);
+        address tokenOwner = IERC721(nftContract).ownerOf(order.tokenId);
         require(tokenOwner == seller, "NFT owner mismatch");
 
         return seller;
@@ -296,7 +358,7 @@ contract AgentMarket is
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
-                    "Order(uint256 tokenId,uint256 expectedPrice,address currency,uint256 expireTime,bytes32 nonce,address receiver,uint256 chainId,address verifyingContract)"
+                    "Order(uint256 tokenId,uint256 expectedPrice,address currency,uint256 expireTime,bytes32 nonce,address receiver,address nftContract,uint256 chainId,address verifyingContract)"
                 ),
                 order.tokenId,
                 order.expectedPrice,
@@ -304,6 +366,7 @@ contract AgentMarket is
                 order.expireTime,
                 order.nonce,
                 order.receiver,
+                order.nftContract,
                 block.chainid,
                 address(this)
             )
@@ -318,13 +381,14 @@ contract AgentMarket is
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
-                    "Offer(uint256 tokenId,uint256 offeredPrice,uint256 expireTime,bool needProof,bytes32 nonce,uint256 chainId,address verifyingContract)"
+                    "Offer(uint256 tokenId,uint256 offeredPrice,uint256 expireTime,bool needProof,bytes32 nonce,address nftContract,uint256 chainId,address verifyingContract)"
                 ),
                 offer.tokenId,
                 offer.offerPrice,
                 offer.expireTime,
                 offer.needProof,
                 offer.nonce,
+                offer.nftContract,
                 block.chainid,
                 address(this)
             )
@@ -348,12 +412,27 @@ contract AgentMarket is
             );
     }
 
+    /// @notice Safely get the creator of a token from NFT contract
+    /// @param nftContract The NFT contract address
+    /// @param tokenId The token ID
+    /// @return The creator address (or address(0) if not supported)
+    function _getCreator(address nftContract, uint256 tokenId) internal view returns (address) {
+        // Try to call creatorOf() if the contract supports it
+        try AgentNFT(nftContract).creatorOf(tokenId) returns (address creator) {
+            return creator;
+        } catch {
+            // If creatorOf() is not supported or reverts, return address(0)
+            return address(0);
+        }
+    }
+
     function _handlePayment(
         uint256 offerPrice,
         address currency,
         address buyer,
         address seller,
-        uint256 tokenId
+        uint256 tokenId,
+        address nftContract
     ) internal {
         AgentMarketStorage storage $ = _getMarketStorage();
         uint256 totalAmount = offerPrice;
@@ -361,7 +440,7 @@ contract AgentMarket is
         uint256 sellerAmount = totalAmount - totalFee;
 
         // Check if this NFT has a creator/partner for fee distribution
-        address creator = AgentNFT($.agentNFT).creatorOf(tokenId);
+        address creator = _getCreator(nftContract, tokenId);
         uint256 partnerFee = 0;
         uint256 platformFee = totalFee;
 
