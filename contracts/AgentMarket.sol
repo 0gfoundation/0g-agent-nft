@@ -181,7 +181,7 @@ contract AgentMarket is
     /// @notice Withdraw partner fees
     /// @dev Partners can withdraw their own fees
     /// @param currency The currency to withdraw (address(0) for native token)
-    function withdrawPartnerFees(address currency) external nonReentrant {
+    function withdrawPartnerFees(address currency) external nonReentrant whenNotPaused {
         AgentMarketStorage storage $ = _getMarketStorage();
         uint256 amount = $.partnerFeeBalances[msg.sender][currency];
         require(amount > 0, "No fees to withdraw");
@@ -221,7 +221,7 @@ contract AgentMarket is
         if (offer.needProof) {
             AgentNFT($.agentNFT).iTransferFrom(seller, buyer, order.tokenId, proofs);
         } else {
-            AgentNFT($.agentNFT).transferFrom(seller, buyer, order.tokenId);
+            AgentNFT($.agentNFT).safeTransferFrom(seller, buyer, order.tokenId);
         }
 
         // 3. transfer erc20 token or 0G
@@ -376,16 +376,29 @@ contract AgentMarket is
 
         // native token
         if (currency == address(0)) {
-            require($.balances[buyer] >= totalAmount, "Insufficient balance");
-            // Update state before external calls (CEI pattern)
-            $.balances[buyer] -= totalAmount;
-            $.feeBalances[currency] += platformFee;
-            if (partnerFee > 0) {
-                $.partnerFeeBalances[creator][currency] += partnerFee;
+            if (msg.value > 0) {
+                // Payment method 1: Direct payment via msg.value (for regular users)
+                require(msg.value >= totalAmount, "Insufficient payment");
+                $.feeBalances[currency] += platformFee;
+                if (partnerFee > 0) {
+                    $.partnerFeeBalances[creator][currency] += partnerFee;
+                }
+                _safeTransferNative(seller, sellerAmount);
+                // Refund excess payment
+                _refundExcess(totalAmount);
+            } else {
+                // Payment method 2: Balance payment via deposit system (for intermediaries)
+                require($.balances[buyer] >= totalAmount, "Insufficient balance");
+                $.balances[buyer] -= totalAmount;
+                $.feeBalances[currency] += platformFee;
+                if (partnerFee > 0) {
+                    $.partnerFeeBalances[creator][currency] += partnerFee;
+                }
+                _safeTransferNative(seller, sellerAmount);
             }
-            _safeTransferNative(seller, sellerAmount);
         } else {
             // ERC20 token
+            require(msg.value == 0, "ETH not accepted for ERC20 payments");
             IERC20 token = IERC20(currency);
             token.safeTransferFrom(buyer, seller, sellerAmount);
             token.safeTransferFrom(buyer, address(this), totalFee);
@@ -410,6 +423,16 @@ contract AgentMarket is
 
         (bool success, ) = payable(to).call{value: amount}("");
         require(success, "Native token transfer failed");
+    }
+
+    /// @notice Internal helper to refund excess payment
+    /// @param requiredAmount The required payment amount
+    function _refundExcess(uint256 requiredAmount) internal {
+        if (msg.value > requiredAmount) {
+            uint256 excess = msg.value - requiredAmount;
+            (bool success, ) = payable(msg.sender).call{value: excess}("");
+            require(success, "Refund failed");
+        }
     }
 
     event MintFeeUpdated(uint256 mintFee);
