@@ -206,6 +206,11 @@ contract AgentMarket is
         Offer calldata offer,
         TransferValidityProof[] calldata proofs
     ) external payable override nonReentrant whenNotPaused {
+        // Prevent ETH from being stuck in zero-price orders
+        if (offer.offerPrice == 0) {
+            require(msg.value == 0, "ETH not accepted for free orders");
+        }
+
         // 1. verify order and offer:
         // 1.1 verify signature
         // 1.2 verify expiration
