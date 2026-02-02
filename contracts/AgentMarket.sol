@@ -227,6 +227,11 @@ contract AgentMarket is
         // 3. transfer erc20 token or 0G
         if (offer.offerPrice > 0) {
             _handlePayment(offer.offerPrice, order.currency, buyer, seller, order.tokenId);
+        } else {
+            // For free orders (offerPrice == 0), refund any ETH sent by mistake
+            if (msg.value > 0) {
+                _refundExcess(0);
+            }
         }
 
         // 4. mark order and offer as used
